@@ -19,6 +19,7 @@ its own domain.
 | OpenAPI contract ↔ mounted-route parity | `npm test` | passing |
 | Session rotation, reuse detection, logout revocation | `npm test` | passing |
 | Password reset: hashing, expiry, single use, session revocation | `npm test` | passing |
+| Browser suite (Chromium): onboarding, read-only customer, rejection | `npm run test:e2e` | passing |
 | Project workspace: onboarding, stages, decisions, comments | `npm test` + live UI run | passing |
 | Production build | `npm run build` | passing |
 | Live HTTP smoke over a real socket | `npm run smoke` | passing |
@@ -35,9 +36,8 @@ production-shaped stack, but Docker is not installed in this workspace, so the
 image build itself has not been executed here. The one-command runner is the
 verified local path; the container path is provided for machines with Docker.
 
-CI runs the fast suite on Node 20 and Node 24, and a separate `integration` job
-boots PostgreSQL 16 + Redis 7 services, migrates, seeds, starts the built API and
-runs `scripts/smoke-live.ts` against it.
+CI runs the fast suite on Node 20 and Node 24, an `integration` job with real
+PostgreSQL 16 + Redis 7 services, and a Chromium browser suite for the portal.
 
 **Local limitation:** this machine has no Docker, WSL, or `psql`. The PostgreSQL
 pass above was executed with a portable PostgreSQL 16.4 cluster in `%TEMP%`
@@ -70,6 +70,8 @@ npm run seed                         # two demo tenants (idempotent)
 npm run dev                          # API only, http://localhost:8080
 npm run portal:dev                   # portal only, http://localhost:3000
 npm run verify                       # typecheck + tests + build + smoke
+npx playwright install chromium      # once, for the browser suite
+npm run test:e2e                     # boots API + portal, runs Chromium tests
 ```
 
 `npm run dev:all` runs the real API middleware and SQL against a seeded
@@ -153,6 +155,8 @@ migrations/                    000–005: extensions, tables, indexes, sessions,
 scripts/                       migrate, seed, onboard, smoke, dev:all, dev:memory
 docs/openapi.yaml              OpenAPI 3.1 contract
 tests/                         support harness + unit + integration + contract
+tests/e2e/                     Playwright browser suite (Chromium)
+playwright.config.ts           boots the in-memory API + portal for e2e runs
 Dockerfile.api                 API image (build stage reused for migrations)
 Dockerfile.portal              Next.js standalone image
 docker-compose.yml             PostgreSQL + Redis + api-setup + API + portal
@@ -420,8 +424,6 @@ comments appearing in the customer thread.
 
 ## Known gaps (next increments)
 
-- Portal has no automated browser suite yet — the end-to-end flow was verified
-  with real HTTP requests against the built app, not a headless browser.
 - MFA and a "manage my sessions" UI are not built; logout, refresh rotation and
   password reset are.
 - Password-reset email uses the console transport. Wire an SMTP/API provider in

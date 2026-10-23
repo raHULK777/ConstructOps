@@ -12,17 +12,24 @@ export interface ChangeOrderRow {
   signed_by: string | null;
   signed_at: Date | string | null;
   ip_address: string | null;
+  rejected_by: string | null;
+  rejected_at: Date | string | null;
   created_at: Date | string;
+  signed_by_first: string | null;
+  signed_by_last: string | null;
+  rejected_by_first: string | null;
+  rejected_by_last: string | null;
 }
 
-const PLAIN_COLUMNS = `
-  id, tenant_id, project_id, title, description, cost_impact, status,
-  signed_by, signed_at, ip_address, created_at
-`;
-
-const JOINED_COLUMNS = `
-  co.id, co.tenant_id, co.project_id, co.title, co.description, co.cost_impact, co.status,
-  co.signed_by, co.signed_at, co.ip_address, co.created_at
+const CHANGE_ORDER_SELECT = `
+  SELECT co.id, co.tenant_id, co.project_id, co.title, co.description, co.cost_impact,
+         co.status, co.signed_by, co.signed_at, co.ip_address, co.rejected_by,
+         co.rejected_at, co.created_at,
+         su.first_name AS signed_by_first, su.last_name AS signed_by_last,
+         ru.first_name AS rejected_by_first, ru.last_name AS rejected_by_last
+    FROM change_orders co
+    LEFT JOIN users su ON su.id = co.signed_by AND su.tenant_id = co.tenant_id
+    LEFT JOIN users ru ON ru.id = co.rejected_by AND ru.tenant_id = co.tenant_id
 `;
 
 export interface ChangeOrderFilters {
@@ -42,28 +49,27 @@ export async function listChangeOrders(
   filters: ChangeOrderFilters,
 ): Promise<ChangeOrderRow[]> {
   const params: unknown[] = [tenantId];
-  let sql: string;
+  let sql = CHANGE_ORDER_SELECT;
+  let where: string;
 
   if (filters.clientId) {
-    sql = `SELECT ${JOINED_COLUMNS}
-             FROM change_orders co
-             JOIN projects p ON p.id = co.project_id AND p.tenant_id = co.tenant_id
-            WHERE co.tenant_id = $1 AND p.client_id = $2`;
+    sql += ` JOIN projects p ON p.id = co.project_id AND p.tenant_id = co.tenant_id`;
+    where = 'WHERE co.tenant_id = $1 AND p.client_id = $2';
     params.push(filters.clientId);
   } else {
-    sql = `SELECT ${PLAIN_COLUMNS} FROM change_orders WHERE tenant_id = $1`;
+    where = 'WHERE co.tenant_id = $1';
   }
 
   if (filters.projectId) {
     params.push(filters.projectId);
-    sql += ` AND ${filters.clientId ? 'co.' : ''}project_id = $${params.length}`;
+    where += ` AND co.project_id = $${params.length}`;
   }
   if (filters.status) {
     params.push(filters.status);
-    sql += ` AND ${filters.clientId ? 'co.' : ''}status = $${params.length}`;
+    where += ` AND co.status = $${params.length}`;
   }
 
-  sql += ` ORDER BY ${filters.clientId ? 'co.' : ''}created_at DESC`;
+  sql += ` ${where} ORDER BY co.created_at DESC`;
   params.push(filters.limit);
   sql += ` LIMIT $${params.length}`;
 
@@ -77,8 +83,7 @@ export async function findChangeOrderById(
   changeOrderId: string,
 ): Promise<ChangeOrderRow | null> {
   const { rows } = await db.query<ChangeOrderRow>(
-    `SELECT ${PLAIN_COLUMNS} FROM change_orders
-      WHERE tenant_id = $1 AND id = $2 LIMIT 1`,
+    `${CHANGE_ORDER_SELECT} WHERE co.tenant_id = $1 AND co.id = $2 LIMIT 1`,
     [tenantId, changeOrderId],
   );
   return rows[0] ?? null;
@@ -91,8 +96,7 @@ export async function findChangeOrderForClient(
   clientId: string,
 ): Promise<ChangeOrderRow | null> {
   const { rows } = await db.query<ChangeOrderRow>(
-    `SELECT ${JOINED_COLUMNS}
-       FROM change_orders co
+    `${CHANGE_ORDER_SELECT}
        JOIN projects p ON p.id = co.project_id AND p.tenant_id = co.tenant_id
       WHERE co.tenant_id = $1 AND co.id = $2 AND p.client_id = $3
       LIMIT 1`,
@@ -113,15 +117,18 @@ export async function insertChangeOrder(
   tenantId: string,
   input: ChangeOrderInsert,
 ): Promise<ChangeOrderRow> {
-  const { rows } = await db.query<ChangeOrderRow>(
+  const { rows } = await db.query<{ id: string }>(
     `INSERT INTO change_orders (tenant_id, project_id, title, description, cost_impact)
      VALUES ($1, $2, $3, $4, $5)
-     RETURNING ${PLAIN_COLUMNS}`,
+     RETURNING id`,
     [tenantId, input.projectId, input.title, input.description, input.costImpact],
   );
-  const row = rows[0];
-  if (!row) throw new Error('Change order insert returned no row.');
-  return row;
+  const id = rows[0]?.id;
+  if (!id) throw new Error('Change order insert returned no row.');
+
+  const created = await findChangeOrderById(db, tenantId, id);
+  if (!created) throw new Error('Change order disappeared after insert.');
+  return created;
 }
 
 export async function approveChangeOrderRow(
@@ -134,27 +141,30 @@ export async function approveChangeOrderRow(
     ipAddress: string | null;
   },
 ): Promise<ChangeOrderRow | null> {
-  const { rows } = await db.query<ChangeOrderRow>(
+  const { rows } = await db.query<{ id: string }>(
     `UPDATE change_orders
         SET status = 'approved', signed_by = $3, signed_at = $4, ip_address = $5
       WHERE tenant_id = $1 AND id = $2 AND status = 'pending'
-      RETURNING ${PLAIN_COLUMNS}`,
+      RETURNING id`,
     [params.tenantId, params.changeOrderId, params.signedBy, params.signedAt, params.ipAddress],
   );
-  return rows[0] ?? null;
+  if (!rows[0]) return null;
+  return findChangeOrderById(db, params.tenantId, params.changeOrderId);
 }
 
 export async function rejectChangeOrderRow(
   db: Queryable,
   tenantId: string,
   changeOrderId: string,
+  rejectedBy: string,
 ): Promise<ChangeOrderRow | null> {
-  const { rows } = await db.query<ChangeOrderRow>(
+  const { rows } = await db.query<{ id: string }>(
     `UPDATE change_orders
-        SET status = 'rejected'
+        SET status = 'rejected', rejected_by = $3, rejected_at = NOW()
       WHERE tenant_id = $1 AND id = $2 AND status = 'pending'
-      RETURNING ${PLAIN_COLUMNS}`,
-    [tenantId, changeOrderId],
+      RETURNING id`,
+    [tenantId, changeOrderId, rejectedBy],
   );
-  return rows[0] ?? null;
+  if (!rows[0]) return null;
+  return findChangeOrderById(db, tenantId, changeOrderId);
 }

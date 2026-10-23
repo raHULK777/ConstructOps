@@ -134,6 +134,65 @@ async function main(): Promise<void> {
   const adminToken = adminSession.token;
   pass('POST /api/v1/auth/login (admin)');
 
+  // Customer onboarding + custom stage workflow in one request.
+  const email = `ci-${Date.now()}@example.com`;
+  const createdProject = await call({
+    method: 'POST',
+    path: '/api/v1/projects',
+    host: ALPHA_HOST,
+    token: adminToken,
+    body: {
+      projectName: 'CI Courtyard Build',
+      estimatedCost: 50_000,
+      customer: {
+        firstName: 'CI',
+        lastName: 'Customer',
+        email,
+        password: 'CiCustomer123!',
+      },
+      stages: ['Permitting', 'Framing'],
+    },
+  });
+  assert.equal(createdProject.status, 201, JSON.stringify(createdProject.body));
+  const project = createdProject.body?.project as
+    | { id: string; clientName?: string; currentPhase?: string }
+    | undefined;
+  assert.ok(project);
+  assert.equal(project.clientName, 'CI Customer');
+  pass('POST /api/v1/projects (customer onboarding + stages)');
+
+  const stageList = await call({
+    path: `/api/v1/projects/${project.id}/stages`,
+    host: ALPHA_HOST,
+    token: adminToken,
+  });
+  assert.equal(stageList.status, 200);
+  const stages = (stageList.body?.stages ?? []) as Array<{ id: string; name: string }>;
+  assert.equal(stages.length, 2);
+
+  const firstStage = stages[0];
+  assert.ok(firstStage);
+  const completed = await call({
+    method: 'PUT',
+    path: `/api/v1/projects/${project.id}/stages/${firstStage.id}`,
+    host: ALPHA_HOST,
+    token: adminToken,
+    body: { status: 'completed' },
+  });
+  assert.equal(completed.status, 200, JSON.stringify(completed.body));
+
+  const progressed = await call({
+    path: `/api/v1/projects/${project.id}`,
+    host: ALPHA_HOST,
+    token: adminToken,
+  });
+  const progressedProject = progressed.body?.project as
+    | { progressPercentage?: number; currentPhase?: string }
+    | undefined;
+  assert.equal(progressedProject?.progressPercentage, 50);
+  assert.equal(progressedProject?.currentPhase, 'Framing');
+  pass('PUT  /api/v1/projects/:id/stages/:stageId (derived progress)');
+
   // Exercising PUT branding proves cache invalidation deletes the Redis entry,
   // then the public read re-populates it (get + setex + del against real Redis).
   const original = await call({ path: '/api/v1/tenant/branding', host: ALPHA_HOST });
@@ -166,7 +225,7 @@ async function main(): Promise<void> {
   const projects = await call({ path: '/api/v1/projects', host: ALPHA_HOST, token: adminToken });
   assert.equal(projects.status, 200);
   const projectList = (projects.body?.projects ?? []) as Array<{ id: string; projectName: string }>;
-  assert.equal(projectList.length, 2);
+  assert.ok(projectList.length >= 2, 'seed should expose at least the two demo projects');
   const downtown = projectList.find((project) => project.projectName.startsWith('Downtown'));
   assert.ok(downtown);
   pass('GET  /api/v1/projects (tenant scoped)');
@@ -196,6 +255,16 @@ async function main(): Promise<void> {
   const pendingOrder = pending[0];
   assert.ok(pendingOrder);
 
+  const comment = await call({
+    method: 'POST',
+    path: `/api/v1/change-orders/${pendingOrder.id}/comments`,
+    host: ALPHA_HOST,
+    token: adminToken,
+    body: { body: 'Please confirm the finish grade before signing.' },
+  });
+  assert.equal(comment.status, 201, JSON.stringify(comment.body));
+  pass('POST /api/v1/change-orders/:id/comments');
+
   const approval = await call({
     method: 'PUT',
     path: `/api/v1/change-orders/${pendingOrder.id}/approve`,
@@ -224,6 +293,16 @@ async function main(): Promise<void> {
   });
   assert.equal(duplicate.status, 409);
   pass('PUT  approve twice -> 409');
+
+  const thread = await call({
+    path: `/api/v1/change-orders/${pendingOrder.id}/comments`,
+    host: ALPHA_HOST,
+    token: clientToken,
+  });
+  assert.equal(thread.status, 200);
+  const comments = (thread.body?.comments ?? []) as Array<{ body: string; authorRole: string }>;
+  assert.ok(comments.some((entry) => entry.body.includes('finish grade')));
+  pass('GET  /api/v1/change-orders/:id/comments (customer visible)');
 
   const summitSession = await login(SUMMIT_HOST, 'admin@summitrenovations.com');
 

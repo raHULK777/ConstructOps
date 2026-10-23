@@ -6,9 +6,13 @@ import { validateBody, validateParams, validateQuery } from '../../utils/validat
 import { createProjectController } from './project.controller';
 import {
   createProjectBodySchema,
+  createStageBodySchema,
   listProjectsQuerySchema,
   projectIdParamsSchema,
+  stageParamsSchema,
   updateProgressBodySchema,
+  updateProjectBodySchema,
+  updateStageBodySchema,
 } from './project.schemas';
 
 export function createProjectRoutes(deps: AppDependencies): Router {
@@ -24,7 +28,21 @@ export function createProjectRoutes(deps: AppDependencies): Router {
     validateBody(createProjectBodySchema),
     controller.create,
   );
+
   router.get('/:id', validateParams(projectIdParamsSchema), controller.get);
+  router.put(
+    '/:id',
+    requireRole('admin'),
+    validateParams(projectIdParamsSchema),
+    validateBody(updateProjectBodySchema),
+    controller.update,
+  );
+  router.delete(
+    '/:id',
+    requireRole('admin'),
+    validateParams(projectIdParamsSchema),
+    controller.remove,
+  );
   router.put(
     '/:id/progress',
     requireRole('admin', 'field_staff'),
@@ -32,11 +50,28 @@ export function createProjectRoutes(deps: AppDependencies): Router {
     validateBody(updateProgressBodySchema),
     controller.updateProgress,
   );
-  router.delete(
-    '/:id',
+
+  // Custom workflow: stages belong to the project, not to a global template.
+  router.get('/:id/stages', validateParams(projectIdParamsSchema), controller.listStages);
+  router.post(
+    '/:id/stages',
     requireRole('admin'),
     validateParams(projectIdParamsSchema),
-    controller.remove,
+    validateBody(createStageBodySchema),
+    controller.createStage,
+  );
+  router.put(
+    '/:id/stages/:stageId',
+    requireRole('admin', 'field_staff'),
+    validateParams(stageParamsSchema),
+    validateBody(updateStageBodySchema),
+    controller.updateStage,
+  );
+  router.delete(
+    '/:id/stages/:stageId',
+    requireRole('admin'),
+    validateParams(stageParamsSchema),
+    controller.deleteStage,
   );
 
   return router;

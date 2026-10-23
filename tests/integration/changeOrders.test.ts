@@ -228,7 +228,7 @@ describe('change orders module', () => {
     expect(again.status).toBe(409);
   });
 
-  it('blocks clients from rejecting orders', async () => {
+  it('lets a client reject their own pending order, with the reason captured as a comment', async () => {
     const orderId = await insertChangeOrder(ctx.db, alphaTenantId, projectA, {
       title: 'Client reject attempt',
     });
@@ -236,9 +236,103 @@ describe('change orders module', () => {
     const response = await request(ctx.app)
       .put(`/api/v1/change-orders/${orderId}/reject`)
       .set('Host', HOSTS.alpha)
+      .set(bearer(clientAToken))
+      .send({ reason: 'Too expensive for this phase.' });
+
+    expect(response.status).toBe(200);
+    expect(response.body.changeOrder.status).toBe('rejected');
+    expect(response.body.changeOrder.rejectedBy).toBe(clientAId);
+
+    const comments = await request(ctx.app)
+      .get(`/api/v1/change-orders/${orderId}/comments`)
+      .set('Host', HOSTS.alpha)
       .set(bearer(clientAToken));
 
-    expect(response.status).toBe(403);
+    expect(comments.status).toBe(200);
+    expect(comments.body.comments).toHaveLength(1);
+    expect(comments.body.comments[0]).toMatchObject({
+      body: 'Too expensive for this phase.',
+      authorRole: 'client',
+    });
+  });
+
+  it('does not let a client reject another client’s order', async () => {
+    const orderId = await insertChangeOrder(ctx.db, alphaTenantId, projectB, {
+      title: 'Not yours to reject',
+    });
+
+    const response = await request(ctx.app)
+      .put(`/api/v1/change-orders/${orderId}/reject`)
+      .set('Host', HOSTS.alpha)
+      .set(bearer(clientAToken))
+      .send({});
+
+    expect(response.status).toBe(404);
+  });
+
+  it('supports a comment thread visible to staff and the owning client', async () => {
+    const orderId = await insertChangeOrder(ctx.db, alphaTenantId, projectA, {
+      title: 'Thread discussion',
+    });
+
+    const clientComment = await request(ctx.app)
+      .post(`/api/v1/change-orders/${orderId}/comments`)
+      .set('Host', HOSTS.alpha)
+      .set(bearer(clientAToken))
+      .send({ body: 'Can you confirm the finish grade?' });
+
+    const staffComment = await request(ctx.app)
+      .post(`/api/v1/change-orders/${orderId}/comments`)
+      .set('Host', HOSTS.alpha)
+      .set(bearer(adminToken))
+      .send({ body: 'Grade B, matching the spec.' });
+
+    expect(clientComment.status).toBe(201);
+    expect(clientComment.body.comment.authorRole).toBe('client');
+    expect(staffComment.status).toBe(201);
+
+    const thread = await request(ctx.app)
+      .get(`/api/v1/change-orders/${orderId}/comments`)
+      .set('Host', HOSTS.alpha)
+      .set(bearer(clientAToken));
+
+    expect(thread.status).toBe(200);
+    expect(thread.body.comments).toHaveLength(2);
+    expect(thread.body.comments[0].body).toBe('Can you confirm the finish grade?');
+  });
+
+  it('keeps other clients out of a change-order thread', async () => {
+    const orderId = await insertChangeOrder(ctx.db, alphaTenantId, projectB, {
+      title: 'Private thread',
+    });
+
+    const read = await request(ctx.app)
+      .get(`/api/v1/change-orders/${orderId}/comments`)
+      .set('Host', HOSTS.alpha)
+      .set(bearer(clientAToken));
+
+    const write = await request(ctx.app)
+      .post(`/api/v1/change-orders/${orderId}/comments`)
+      .set('Host', HOSTS.alpha)
+      .set(bearer(clientAToken))
+      .send({ body: 'Should not land.' });
+
+    expect(read.status).toBe(404);
+    expect(write.status).toBe(404);
+  });
+
+  it('validates comment bodies', async () => {
+    const orderId = await insertChangeOrder(ctx.db, alphaTenantId, projectA, {
+      title: 'Validation thread',
+    });
+
+    const response = await request(ctx.app)
+      .post(`/api/v1/change-orders/${orderId}/comments`)
+      .set('Host', HOSTS.alpha)
+      .set(bearer(clientAToken))
+      .send({ body: '   ' });
+
+    expect(response.status).toBe(400);
   });
 
   it('enforces the premium feature gate from the resolved tenant', async () => {

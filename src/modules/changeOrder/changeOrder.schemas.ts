@@ -20,6 +20,19 @@ export const createChangeOrderBodySchema = z.strictObject({
   costImpact: z.number().min(0).max(9_999_999_999.99),
 });
 
+/** Approval is a signature; rejection may carry a short explanation. */
+export const rejectChangeOrderBodySchema = z
+  .strictObject({
+    reason: z.string().trim().min(1).max(2000).optional(),
+  })
+  .default({});
+
+export const commentBodySchema = z.strictObject({
+  body: z.string().trim().min(1).max(2000),
+});
+
 export type ChangeOrderIdParams = z.infer<typeof changeOrderIdParamsSchema>;
 export type ListChangeOrdersQuery = z.infer<typeof listChangeOrdersQuerySchema>;
 export type CreateChangeOrderBody = z.infer<typeof createChangeOrderBodySchema>;
+export type RejectChangeOrderBody = z.infer<typeof rejectChangeOrderBodySchema>;
+export type CommentBody = z.infer<typeof commentBodySchema>;

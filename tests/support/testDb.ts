@@ -4,7 +4,12 @@ import path from 'node:path';
 import { newDb, DataType } from 'pg-mem';
 import type { Db } from '../../src/config/database';
 
-const MIGRATION_FILES = ['001_tables.sql', '002_indexes.sql', '003_auth_sessions.sql'] as const;
+const MIGRATION_FILES = [
+  '001_tables.sql',
+  '002_indexes.sql',
+  '003_auth_sessions.sql',
+  '004_project_workspace.sql',
+] as const;
 
 /**
  * In-memory PostgreSQL for the test suite. The production DDL is executed

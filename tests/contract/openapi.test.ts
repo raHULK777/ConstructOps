@@ -83,8 +83,8 @@ describe('OpenAPI contract', () => {
   });
 
   it('documents the full implemented surface', () => {
-    expect(operations).toHaveLength(18);
-    expect(new Set(operations.map((operation) => operation.operationId)).size).toBe(18);
+    expect(operations).toHaveLength(25);
+    expect(new Set(operations.map((operation) => operation.operationId)).size).toBe(25);
   });
 
   it('gives every operation an id, summary, tag and success response', () => {

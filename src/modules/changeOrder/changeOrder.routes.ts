@@ -7,8 +7,10 @@ import { validateBody, validateParams, validateQuery } from '../../utils/validat
 import { createChangeOrderController } from './changeOrder.controller';
 import {
   changeOrderIdParamsSchema,
+  commentBodySchema,
   createChangeOrderBodySchema,
   listChangeOrdersQuerySchema,
+  rejectChangeOrderBodySchema,
 } from './changeOrder.schemas';
 
 export function createChangeOrderRoutes(deps: AppDependencies): Router {
@@ -28,7 +30,7 @@ export function createChangeOrderRoutes(deps: AppDependencies): Router {
   );
   router.get('/:id', validateParams(changeOrderIdParamsSchema), controller.get);
 
-  // Legal signature: strictly the client role, on their own project only.
+  // The client decides (approve or reject); staff may also close a draft.
   router.put(
     '/:id/approve',
     requireRole('client'),
@@ -37,9 +39,19 @@ export function createChangeOrderRoutes(deps: AppDependencies): Router {
   );
   router.put(
     '/:id/reject',
-    requireRole('admin'),
+    requireRole('admin', 'client'),
     validateParams(changeOrderIdParamsSchema),
+    validateBody(rejectChangeOrderBodySchema),
     controller.reject,
+  );
+
+  // Discussion thread: any role with visibility into the order.
+  router.get('/:id/comments', validateParams(changeOrderIdParamsSchema), controller.listComments);
+  router.post(
+    '/:id/comments',
+    validateParams(changeOrderIdParamsSchema),
+    validateBody(commentBodySchema),
+    controller.addComment,
   );
 
   return router;

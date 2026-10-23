@@ -6,13 +6,17 @@ import { clientIp } from '../../utils/ip';
 import { validatedBody, validatedParams, validatedQuery } from '../../utils/validation';
 import type {
   ChangeOrderIdParams,
+  CommentBody,
   CreateChangeOrderBody,
   ListChangeOrdersQuery,
+  RejectChangeOrderBody,
 } from './changeOrder.schemas';
 import {
+  addChangeOrderComment,
   approveChangeOrder,
   createChangeOrder,
   getChangeOrderForUser,
+  listChangeOrderComments,
   listChangeOrdersForUser,
   rejectChangeOrder,
 } from './changeOrder.service';
@@ -52,13 +56,32 @@ export function createChangeOrderController(deps: AppDependencies) {
 
     reject: asyncHandler(async (req: Request, res: Response) => {
       const tenant = requireTenant(req);
+      const user = requireUser(req);
       const { id } = validatedParams<ChangeOrderIdParams>(req);
-      const changeOrder = await rejectChangeOrder(deps, tenant, id);
+      const body = validatedBody<RejectChangeOrderBody>(req);
+      const changeOrder = await rejectChangeOrder(deps, tenant, user, id, body.reason);
       res.status(200).json({
         success: true,
         message: 'Change order rejected.',
         changeOrder,
       });
+    }),
+
+    listComments: asyncHandler(async (req: Request, res: Response) => {
+      const tenant = requireTenant(req);
+      const user = requireUser(req);
+      const { id } = validatedParams<ChangeOrderIdParams>(req);
+      const comments = await listChangeOrderComments(deps, tenant, user, id);
+      res.status(200).json({ success: true, comments });
+    }),
+
+    addComment: asyncHandler(async (req: Request, res: Response) => {
+      const tenant = requireTenant(req);
+      const user = requireUser(req);
+      const { id } = validatedParams<ChangeOrderIdParams>(req);
+      const body = validatedBody<CommentBody>(req);
+      const comment = await addChangeOrderComment(deps, tenant, user, id, body.body);
+      res.status(201).json({ success: true, comment });
     }),
   };
 }

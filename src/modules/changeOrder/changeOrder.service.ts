@@ -2,6 +2,7 @@ import type { AuthUser, TenantRecord } from '../../types/domain';
 import type { AppDependencies } from '../../types/dependencies';
 import { badRequest, conflict, notFound } from '../../utils/errors';
 import { findProjectById } from '../project/project.repository';
+import { insertComment, listComments, type CommentRow } from './comment.repository';
 import { toChangeOrderDto, type ChangeOrderDto } from './changeOrder.mapper';
 import {
   approveChangeOrderRow,
@@ -133,18 +134,108 @@ export async function approveChangeOrder(
 export async function rejectChangeOrder(
   deps: AppDependencies,
   tenant: TenantRecord,
+  actor: AuthUser,
   changeOrderId: string,
+  reason?: string,
 ): Promise<ChangeOrderDto> {
-  const updated = await rejectChangeOrderRow(deps.db, tenant.id, changeOrderId);
-  if (updated) {
-    deps.logger.info('Change order rejected', {
-      tenantId: tenant.id,
-      changeOrderId: updated.id,
-    });
-    return toChangeOrderDto(updated);
+  // Clients may reject only their own project's order; staff may reject any.
+  const visible =
+    actor.role === 'client'
+      ? await findChangeOrderForClient(deps.db, tenant.id, changeOrderId, actor.id)
+      : await findChangeOrderById(deps.db, tenant.id, changeOrderId);
+
+  if (!visible) throw notFound();
+  if (visible.status !== 'pending') {
+    throw conflict(`Change order is already ${visible.status}.`);
   }
 
-  const existing = await findChangeOrderById(deps.db, tenant.id, changeOrderId);
-  if (!existing) throw notFound();
-  throw conflict(`Change order is already ${existing.status}.`);
+  const updated = await rejectChangeOrderRow(deps.db, tenant.id, changeOrderId, actor.id);
+  if (!updated) {
+    throw conflict('Change order is no longer pending.');
+  }
+
+  if (reason) {
+    try {
+      await insertComment(deps.db, tenant.id, changeOrderId, actor.id, reason);
+    } catch (error) {
+      // The decision stands even if the accompanying note fails to persist.
+      deps.logger.warn('Rejection comment failed to persist', {
+        tenantId: tenant.id,
+        changeOrderId,
+        error: (error as Error).message,
+      });
+    }
+  }
+
+  deps.logger.info('Change order rejected', {
+    tenantId: tenant.id,
+    changeOrderId: updated.id,
+    rejectedBy: actor.id,
+    byClient: actor.role === 'client',
+  });
+  return toChangeOrderDto(updated);
+}
+
+export interface CommentDto {
+  id: string;
+  changeOrderId: string;
+  authorId: string;
+  authorName: string;
+  authorRole: string;
+  body: string;
+  createdAt: string;
+}
+
+function toCommentDto(row: CommentRow): CommentDto {
+  const name = [row.first_name, row.last_name].filter(Boolean).join(' ').trim();
+  return {
+    id: row.id,
+    changeOrderId: row.change_order_id,
+    authorId: row.author_id,
+    authorName: name || row.author_email,
+    authorRole: row.author_role,
+    body: row.body,
+    createdAt: new Date(row.created_at).toISOString(),
+  };
+}
+
+async function requireVisibleChangeOrder(
+  deps: AppDependencies,
+  tenant: TenantRecord,
+  user: AuthUser,
+  changeOrderId: string,
+): Promise<void> {
+  const visible =
+    user.role === 'client'
+      ? await findChangeOrderForClient(deps.db, tenant.id, changeOrderId, user.id)
+      : await findChangeOrderById(deps.db, tenant.id, changeOrderId);
+  if (!visible) throw notFound();
+}
+
+export async function listChangeOrderComments(
+  deps: AppDependencies,
+  tenant: TenantRecord,
+  user: AuthUser,
+  changeOrderId: string,
+): Promise<CommentDto[]> {
+  await requireVisibleChangeOrder(deps, tenant, user, changeOrderId);
+  const rows = await listComments(deps.db, tenant.id, changeOrderId);
+  return rows.map(toCommentDto);
+}
+
+export async function addChangeOrderComment(
+  deps: AppDependencies,
+  tenant: TenantRecord,
+  user: AuthUser,
+  changeOrderId: string,
+  body: string,
+): Promise<CommentDto> {
+  await requireVisibleChangeOrder(deps, tenant, user, changeOrderId);
+  const row = await insertComment(deps.db, tenant.id, changeOrderId, user.id, body);
+  deps.logger.info('Change order comment added', {
+    tenantId: tenant.id,
+    changeOrderId,
+    authorId: user.id,
+  });
+  return toCommentDto(row);
 }

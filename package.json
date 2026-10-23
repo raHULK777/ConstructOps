@@ -23,6 +23,7 @@
     "smoke": "tsx scripts/smoke.ts",
     "smoke:live": "tsx scripts/smoke-live.ts",
     "dev:memory": "tsx scripts/dev-inmemory-api.ts",
+    "dev:all": "node scripts/dev-up.mjs",
     "portal:dev": "npm run dev -w @constructops/portal",
     "portal:build": "npm run build -w @constructops/portal",
     "portal:start": "npm run start -w @constructops/portal",

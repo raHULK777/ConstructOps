@@ -1,3 +1,25 @@
+# Production-shaped local stack: PostgreSQL 16, Redis 7, the API and the portal.
+#
+#   docker compose up --build
+#   portal  http://localhost:3000
+#   api     http://localhost:8080  (/healthz, /readyz)
+#
+# Demo accounts (password ChangeMe!123):
+#   admin@alphabuilders.com / field@alphabuilders.com / client@alphabuilders.com
+#
+# Credentials here are for local testing only. Never deploy this file unchanged.
+
+x-api-environment: &api-environment
+  NODE_ENV: production
+  PORT: '8080'
+  DATABASE_URL: postgresql://constructops:constructops@postgres:5432/constructops
+  REDIS_URL: redis://redis:6379
+  JWT_SECRET: dev-only-hmac-secret-replace-me-at-least-32-chars
+  PLATFORM_ROOT_DOMAIN: constructops.test
+  TRUST_PROXY: 'false'
+  BCRYPT_ROUNDS: '10'
+  SEED_PASSWORD: ChangeMe!123
+
 services:
   postgres:
     image: postgres:16-alpine
@@ -31,6 +53,58 @@ services:
       interval: 5s
       timeout: 5s
       retries: 10
+
+  # One-shot: apply migrations and seed the demo tenants before the API starts.
+  api-setup:
+    build:
+      context: .
+      dockerfile: Dockerfile.api
+      target: build
+    container_name: constructops-api-setup
+    environment: *api-environment
+    command: ['sh', '-c', 'npm run migrate && npm run seed']
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    restart: 'no'
+
+  api:
+    build:
+      context: .
+      dockerfile: Dockerfile.api
+    container_name: constructops-api
+    restart: unless-stopped
+    environment: *api-environment
+    ports:
+      - '8080:8080'
+    depends_on:
+      api-setup:
+        condition: service_completed_successfully
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+
+  portal:
+    build:
+      context: .
+      dockerfile: Dockerfile.portal
+    container_name: constructops-portal
+    restart: unless-stopped
+    environment:
+      NODE_ENV: production
+      PORT: '3000'
+      API_BASE_URL: http://api:8080
+      TENANT_HOST_OVERRIDE: alpha-builders.constructops.test
+      # Local HTTP only: Secure cookies would never be sent over http://localhost.
+      COOKIE_SECURE: 'false'
+    ports:
+      - '3000:3000'
+    depends_on:
+      api:
+        condition: service_healthy
 
 volumes:
   constructops_pgdata:

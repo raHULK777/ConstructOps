@@ -1,0 +1,30 @@
+# ---- build: compile the Next.js standalone bundle
+FROM node:24-alpine AS build
+
+WORKDIR /app
+
+COPY package.json package-lock.json ./
+COPY portal/package.json ./portal/package.json
+RUN npm ci --include=dev --no-audit --no-fund
+
+COPY portal ./portal
+RUN npm run build -w @constructops/portal
+
+# ---- runtime: self-contained Next.js server (no node_modules install needed)
+FROM node:24-alpine AS runtime
+
+WORKDIR /app
+ENV NODE_ENV=production \
+    PORT=3000 \
+    HOSTNAME=0.0.0.0 \
+    NEXT_TELEMETRY_DISABLED=1
+
+COPY --from=build /app/portal/.next/standalone ./
+COPY --from=build /app/portal/.next/static ./portal/.next/static
+
+EXPOSE 3000
+
+HEALTHCHECK --interval=10s --timeout=3s --start-period=15s --retries=6 \
+  CMD wget -qO- http://127.0.0.1:3000/login || exit 1
+
+CMD ["node", "portal/server.js"]

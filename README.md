@@ -15,8 +15,9 @@ its own domain.
 | Check | Command | Status |
 |---|---|---|
 | Strict typecheck (src, scripts, tests) | `npm run typecheck` | passing |
-| Behaviour suite — 101 tests | `npm test` | passing |
+| Behaviour suite — 111 tests | `npm test` | passing |
 | OpenAPI contract ↔ mounted-route parity | `npm test` | passing |
+| Session rotation, reuse detection, logout revocation | `npm test` | passing |
 | Production build | `npm run build` | passing |
 | Live HTTP smoke over a real socket | `npm run smoke` | passing |
 | Portal production build (Next.js 16) | `npm run portal:build` | passing |
@@ -24,7 +25,13 @@ its own domain.
 | Migration DDL executed verbatim | via `tests/support/testDb.ts` | passing (pg-mem) |
 | Real PostgreSQL 16: migrate, re-migrate, seed, onboarding, audit trail | portable cluster, `smoke:live` | passing |
 | Real PostgreSQL 16 + Redis 7 (CI `integration` job) | `npm run migrate && npm run seed && npm run smoke:live` | passing in CI |
+| One-command local stack (API + portal, no Docker) | `npm run dev:all` | passing |
 | Fail-fast on invalid environment | `node dist/server.js` without env | exits 1 with field names |
+
+**Docker:** `docker-compose.yml` and the two Dockerfiles describe the
+production-shaped stack, but Docker is not installed in this workspace, so the
+image build itself has not been executed here. The one-command runner is the
+verified local path; the container path is provided for machines with Docker.
 
 CI runs the fast suite on Node 20 and Node 24, and a separate `integration` job
 boots PostgreSQL 16 + Redis 7 services, migrates, seeds, starts the built API and
@@ -39,7 +46,7 @@ run; locally the API was verified with Redis absent, including the documented
 The automated suite substitutes PostgreSQL with `pg-mem` — which executes the
 **real** `migrations/001_tables.sql` and `002_indexes.sql`, including foreign
 keys, cascades, checks and unique constraints — and Redis with an in-memory
-double that can be forced to fail. All 101 tests drive the real Express pipeline,
+double that can be forced to fail. All 111 tests drive the real Express pipeline,
 real middleware and real SQL.
 
 ---
@@ -47,15 +54,25 @@ real middleware and real SQL.
 ## Quick start
 
 ```bash
+# Fastest path — no Docker, no PostgreSQL install:
 npm install
+npm run dev:all                      # API :8080 + portal :3000, seeded demo tenants
+
+# Production-shaped stack (PostgreSQL 16 + Redis 7 + built API and portal):
+docker compose up --build            # portal :3000, api :8080
+
+# Manual infrastructure path:
 cp .env.example .env                 # set DATABASE_URL, REDIS_URL, JWT_SECRET
 npm run migrate                      # checksummed, transactional migrations
 npm run seed                         # two demo tenants (idempotent)
-
-npm run dev                          # API, http://localhost:8080
-npm run portal:dev                   # portal, http://localhost:3000 (second terminal)
+npm run dev                          # API only, http://localhost:8080
+npm run portal:dev                   # portal only, http://localhost:3000
 npm run verify                       # typecheck + tests + build + smoke
 ```
+
+`npm run dev:all` runs the real API middleware and SQL against a seeded
+in-memory PostgreSQL and starts the Next.js dev server. Press `Ctrl+C` to stop
+both. It prints the workspace URL and demo credentials when ready.
 
 No PostgreSQL or Redis on your machine? Run the API against an in-memory engine
 seeded with the demo tenants — the real middleware and SQL, zero infrastructure:
@@ -129,11 +146,14 @@ src/
   types/                       domain records, Zod contracts, Express augments
   utils/                       asyncHandler, errors, jwt, password, host, uuid
 portal/                        Next.js white-label portal (see "Portal" below)
-migrations/                    000 extensions · 001 tables · 002 indexes
-scripts/                       migrate, seed, onboard, smoke, dev:memory
+migrations/                    000 extensions · 001 tables · 002 indexes · 003 sessions
+scripts/                       migrate, seed, onboard, smoke, dev:all, dev:memory
 docs/openapi.yaml              OpenAPI 3.1 contract
 tests/                         support harness + unit + integration + contract
-.github/workflows/ci.yml       typecheck, test, build, smoke (Node 20 & 24)
+Dockerfile.api                 API image (build stage reused for migrations)
+Dockerfile.portal              Next.js standalone image
+docker-compose.yml             PostgreSQL + Redis + api-setup + API + portal
+.github/workflows/ci.yml       verify (Node 20/24) + integration (real PG/Redis)
 ```
 
 ---
@@ -171,6 +191,28 @@ Two deliberate hardenings beyond the reference documents:
 
 ---
 
+## Authentication & sessions
+
+- **Access token** — HS256 JWT, 15 minutes, claims `sub`, `tenant_id`, `role`,
+  `email`, `sid` (session id). Short by design: it is the only credential the
+  data endpoints accept.
+- **Refresh token** — 256-bit opaque value, 30 days, stored as a SHA-256 hash in
+  `auth_sessions` and returned only to the client that logged in.
+- **Rotation** — every `/auth/refresh` revokes the presented session and issues a
+  new pair. Replaying a consumed token is treated as theft: every session for
+  that user is revoked.
+- **Immediate revocation** — `authenticate` joins the session row on `sid` and
+  rejects revoked or expired sessions, so logout kills the access token at once
+  rather than at expiry.
+- **Portal** — both tokens live in `httpOnly`, `SameSite=Lax` cookies; a
+  `SessionKeeper` client component refreshes at 10 minutes, and route handlers
+  rotate or revoke on the server. The browser never sees a token.
+- **Knobs** — `JWT_EXPIRES_IN` (default `15m`), `REFRESH_TOKEN_TTL_DAYS`
+  (default `30`). Expired rows are inert; prune them with a scheduled
+  `DELETE FROM auth_sessions WHERE expires_at < NOW() - INTERVAL '7 days'`.
+
+---
+
 ## API surface
 
 Base path `/api/v1`. All responses are `{ success: boolean, ... }`; errors are
@@ -181,7 +223,9 @@ Base path `/api/v1`. All responses are `{ success: boolean, ... }`; errors are
 |---|---|---|---|
 | GET | `/healthz` | public | liveness |
 | GET | `/readyz` | public | 503 unless DB **and** Redis answer |
-| POST | `/auth/login` | public | tenant resolved from host; returns token + branding |
+| POST | `/auth/login` | public | returns short-lived access token + rotating refresh token |
+| POST | `/auth/refresh` | public | single-use rotation; replay revokes the whole session family |
+| POST | `/auth/logout` | public | revokes the session; its access token stops working immediately |
 | GET | `/tenant/branding` | public | theme tokens; never exposes pricing or IDs |
 | PUT | `/tenant/branding` | admin | colours, logo, typography, radius; invalidates cache |
 | POST | `/tools/estimate` | public, `enable_estimator` | tenant pricing matrix |
@@ -327,9 +371,9 @@ recorded audit trail, rejection of a second signature, and a live re-theme after
 
 - Portal has no automated browser suite yet — the end-to-end flow was verified
   with real HTTP requests against the built app, not a headless browser.
-- Refresh tokens, logout/revocation lists and password reset are not built.
-  Signing out clears the portal cookie; the JWT itself remains valid until expiry.
+- Password reset, MFA and a "manage my sessions" UI are not built. Logout and
+  refresh rotation are implemented; the JWT itself is short-lived by design.
 - Transactional email, CSV exports and the operator (platform-superadmin) console
   are out of scope for v1 per `SRS.txt`.
-- Real PostgreSQL/Redis integration should be run once via `docker compose`
-  before production rollout.
+- Real PostgreSQL/Redis integration is covered by CI; run it locally with
+  `docker compose` if you want the same shape on your machine.

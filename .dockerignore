@@ -1,0 +1,14 @@
+node_modules
+portal/node_modules
+dist
+portal/.next
+.git
+.gitignore
+.github
+.env
+.env.*
+*.log
+npm-install.log
+tests
+docs
+*.md

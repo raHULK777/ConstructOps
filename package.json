@@ -4,8 +4,11 @@
   "private": true,
   "description": "ConstructOps Engine - multi-tenant, white-label construction operations platform (Express + TypeScript + PostgreSQL + Redis)",
   "license": "UNLICENSED",
+  "workspaces": [
+    "portal"
+  ],
   "engines": {
-    "node": ">=20.0.0"
+    "node": ">=20.9.0"
   },
   "scripts": {
     "dev": "tsx watch src/server.ts",
@@ -18,6 +21,10 @@
     "seed": "tsx scripts/seed.ts",
     "onboard": "tsx scripts/onboard.ts",
     "smoke": "tsx scripts/smoke.ts",
+    "dev:memory": "tsx scripts/dev-inmemory-api.ts",
+    "portal:dev": "npm run dev -w @constructops/portal",
+    "portal:build": "npm run build -w @constructops/portal",
+    "portal:start": "npm run start -w @constructops/portal",
     "verify": "npm run typecheck && npm test && npm run build && npm run smoke"
   },
   "dependencies": {

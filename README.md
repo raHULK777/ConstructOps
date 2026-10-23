@@ -2,10 +2,11 @@
 
 [![CI](https://github.com/raHULK777/ConstructOps/actions/workflows/ci.yml/badge.svg)](https://github.com/raHULK777/ConstructOps/actions/workflows/ci.yml)
 
-Multi-tenant, white-label operations API for mid-sized construction contractors.
-One deployment serves many branded workspaces, each resolved from its own domain.
+Multi-tenant, white-label construction operations platform: an Express API and a
+Next.js portal. One deployment serves many branded workspaces, each resolved from
+its own domain.
 
-**Stack (fixed by specification):** Node.js 20+ · TypeScript · Express 5 · PostgreSQL · Redis · JWT (HS256)
+**Stack:** Node.js 20+ · TypeScript · Express 5 · PostgreSQL · Redis · JWT (HS256) · Next.js 16 · Tailwind
 
 ---
 
@@ -18,6 +19,8 @@ One deployment serves many branded workspaces, each resolved from its own domain
 | OpenAPI contract ↔ mounted-route parity | `npm test` | passing |
 | Production build | `npm run build` | passing |
 | Live HTTP smoke over a real socket | `npm run smoke` | passing |
+| Portal production build (Next.js 16) | `npm run portal:build` | passing |
+| Portal end-to-end over HTTP (login, dashboard, approval, re-theme) | in-memory API + portal build | passing |
 | Migration DDL executed verbatim | via `tests/support/testDb.ts` | passing (pg-mem) |
 | Fail-fast on invalid environment | `node dist/server.js` without env | exits 1 with field names |
 
@@ -52,9 +55,22 @@ cp .env.example .env                 # set DATABASE_URL, REDIS_URL, JWT_SECRET
 npm run migrate                      # checksummed, transactional migrations
 npm run seed                         # two demo tenants (idempotent)
 
-npm run dev                          # tsx watch, http://localhost:8080
+npm run dev                          # API, http://localhost:8080
+npm run portal:dev                   # portal, http://localhost:3000 (second terminal)
 npm run verify                       # typecheck + tests + build + smoke
 ```
+
+No PostgreSQL or Redis on your machine? Run the API against an in-memory engine
+seeded with the demo tenants — the real middleware and SQL, zero infrastructure:
+
+```bash
+npm run dev:memory                   # API on :8080 (pg-mem + seeded demo data)
+npm run portal:dev                   # portal on :3000, themed as Alpha Builders
+```
+
+The portal talks to the API server-side, so localhost works without tenant DNS
+(`TENANT_HOST_OVERRIDE` in `portal/.env.example`, default
+`alpha-builders.constructops.test`).
 
 Demo workspaces (all passwords = `SEED_PASSWORD`, default `ChangeMe!123`):
 
@@ -115,8 +131,9 @@ src/
   demo/seed.ts                 demo dataset (used by seed + tests)
   types/                       domain records, Zod contracts, Express augments
   utils/                       asyncHandler, errors, jwt, password, host, uuid
+portal/                        Next.js white-label portal (see "Portal" below)
 migrations/                    000 extensions · 001 tables · 002 indexes
-scripts/                       migrate, seed, onboard, smoke
+scripts/                       migrate, seed, onboard, smoke, dev:memory
 docs/openapi.yaml              OpenAPI 3.1 contract
 tests/                         support harness + unit + integration + contract
 .github/workflows/ci.yml       typecheck, test, build, smoke (Node 20 & 24)
@@ -228,6 +245,45 @@ token or body — flipping a paid module is a data change, not a deploy.
 
 ---
 
+## Portal (Next.js)
+
+`portal/` is the workspace UI the contractor and their client actually use.
+
+- **Runtime theming.** The root layout reads `GET /api/v1/tenant/branding` on
+  every request (never at build time), injects the tenant's colour, radius and
+  font as CSS custom properties on `<html>`, and Tailwind binds utilities to
+  those variables. A branding change re-skins the portal on the next navigation,
+  with no rebuild and no redeploy.
+- **Tokens stay server-side.** Login goes through `POST /api/session`, which
+  exchanges credentials with the API and stores the JWT in an `httpOnly`,
+  `SameSite=Lax` cookie. The browser never holds the token; server components
+  read the cookie and route handlers (`/api/projects/:id/progress`,
+  `/api/change-orders/:id/approve`, `/api/branding`) forward it. There is no
+  wildcard proxy.
+- **Tenant by host.** In production the incoming `Host` is forwarded to the API,
+  so the portal and API resolve the same tenant. On localhost the configured
+  `TENANT_HOST_OVERRIDE` is used instead.
+- **Role-aware, not role-authoritative.** Navigation and controls follow the
+  claims in the session (Branding is admin-only, the signature button is
+  client-only), but every decision is re-checked by the API. The portal decodes
+  the JWT for display only; it does not verify it.
+- **Pages.** `/login` → `/dashboard` (portfolio stats, project cards) →
+  `/dashboard/projects/[id]` (phase, progress, change orders, signature) →
+  `/dashboard/branding` (admin editor with live preview).
+
+```bash
+npm run portal:dev      # http://localhost:3000
+npm run portal:build    # production build
+npm run portal:start    # serve the build on :3000
+```
+
+Verified end-to-end over HTTP against the in-memory API: admin login, themed
+dashboard with real project data, progress update form, client signature with
+recorded audit trail, rejection of a second signature, and a live re-theme after
+`PUT /api/branding`.
+
+---
+
 ## Operational notes
 
 - **Migrations** are checksummed; editing an applied file aborts the run. A
@@ -257,13 +313,17 @@ token or body — flipping a paid module is a data change, not a deploy.
 | Error envelope adds `code` + `requestId` | machine-readable failures and log correlation; `error` stays first-class |
 | `404` (not `403`) for another client's record | avoids confirming that a foreign record exists |
 | `409` on double approval | the second signature is a conflict, not a silent success |
+| Portal proxies API calls server-side | keeps the JWT out of JavaScript and preserves Host-based tenant resolution |
+| Portal decodes (does not verify) the JWT for UI gating | the API remains the only authorisation authority |
 
 ---
 
 ## Known gaps (next increments)
 
-- No frontend in this repository — this is the API engine the portal consumes.
+- Portal has no automated browser suite yet — the end-to-end flow was verified
+  with real HTTP requests against the built app, not a headless browser.
 - Refresh tokens, logout/revocation lists and password reset are not built.
+  Signing out clears the portal cookie; the JWT itself remains valid until expiry.
 - Transactional email, CSV exports and the operator (platform-superadmin) console
   are out of scope for v1 per `SRS.txt`.
 - Real PostgreSQL/Redis integration should be run once via `docker compose`

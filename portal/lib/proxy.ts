@@ -40,3 +40,29 @@ export async function forwardMutation(
     );
   }
 }
+
+/**
+ * Forwards a public auth call (forgot/reset password). No session is required;
+ * the tenant still comes from the Host header, never from the request body.
+ */
+export async function forwardPublic(
+  request: Request,
+  apiPath: string,
+  method: 'POST' = 'POST',
+): Promise<NextResponse> {
+  const body = await request.json().catch(() => undefined);
+  const host = await resolveTenantHost();
+
+  try {
+    const result = await apiRequest(apiPath, { method, host, body });
+    return NextResponse.json(result.data ?? { success: false, error: 'Request failed.' }, {
+      status: result.status || 502,
+    });
+  } catch (error) {
+    console.error(`Public proxy failed (${method} ${apiPath}): ${(error as Error).message}`);
+    return NextResponse.json(
+      { success: false, error: 'Authentication service unavailable.' },
+      { status: 502 },
+    );
+  }
+}

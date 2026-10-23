@@ -15,9 +15,10 @@ its own domain.
 | Check | Command | Status |
 |---|---|---|
 | Strict typecheck (src, scripts, tests) | `npm run typecheck` | passing |
-| Behaviour suite — 122 tests | `npm test` | passing |
+| Behaviour suite — 130 tests | `npm test` | passing |
 | OpenAPI contract ↔ mounted-route parity | `npm test` | passing |
 | Session rotation, reuse detection, logout revocation | `npm test` | passing |
+| Password reset: hashing, expiry, single use, session revocation | `npm test` | passing |
 | Project workspace: onboarding, stages, decisions, comments | `npm test` + live UI run | passing |
 | Production build | `npm run build` | passing |
 | Live HTTP smoke over a real socket | `npm run smoke` | passing |
@@ -47,7 +48,7 @@ run; locally the API was verified with Redis absent, including the documented
 The automated suite substitutes PostgreSQL with `pg-mem` — which executes the
 **real** `migrations/001_tables.sql` through `004_project_workspace.sql`, including
 foreign keys, cascades, checks and unique constraints — and Redis with an in-memory
-double that can be forced to fail. All 122 tests drive the real Express pipeline,
+double that can be forced to fail. All 130 tests drive the real Express pipeline,
 real middleware and real SQL.
 
 ---
@@ -73,7 +74,8 @@ npm run verify                       # typecheck + tests + build + smoke
 
 `npm run dev:all` runs the real API middleware and SQL against a seeded
 in-memory PostgreSQL and starts the Next.js dev server. Press `Ctrl+C` to stop
-both. It prints the workspace URL and demo credentials when ready.
+both. It prints the workspace URL and demo credentials when ready; password-reset
+emails (with their links) are printed to the same console by the dev mailer.
 
 No PostgreSQL or Redis on your machine? Run the API against an in-memory engine
 seeded with the demo tenants — the real middleware and SQL, zero infrastructure:
@@ -147,7 +149,7 @@ src/
   types/                       domain records, Zod contracts, Express augments
   utils/                       asyncHandler, errors, jwt, password, host, uuid
 portal/                        Next.js white-label portal (see "Portal" below)
-migrations/                    000–004: extensions, tables, indexes, sessions, workspace
+migrations/                    000–005: extensions, tables, indexes, sessions, workspace, resets
 scripts/                       migrate, seed, onboard, smoke, dev:all, dev:memory
 docs/openapi.yaml              OpenAPI 3.1 contract
 tests/                         support harness + unit + integration + contract
@@ -208,8 +210,19 @@ Two deliberate hardenings beyond the reference documents:
 - **Portal** — both tokens live in `httpOnly`, `SameSite=Lax` cookies; a
   `SessionKeeper` client component refreshes at 10 minutes, and route handlers
   rotate or revoke on the server. The browser never sees a token.
+- **Password reset.** `POST /auth/forgot-password` always returns the same message
+  (no account enumeration) and emails a single-use link when the account exists.
+  Only a SHA-256 hash of the token is stored; it expires after
+  `RESET_TOKEN_TTL_MINUTES`. `POST /auth/reset-password` sets the new password,
+  invalidates every outstanding token and revokes all sessions for the user.
+- **Email transport.** v1 has no provider: `MAIL_TRANSPORT=console` writes mail —
+  including the reset link — to the service log (great for local development),
+  and production defaults to `none` so tokens never reach production logs. Wire a
+  real transport in `src/services/mailer.ts` before launching password reset
+  publicly.
 - **Knobs** — `JWT_EXPIRES_IN` (default `15m`), `REFRESH_TOKEN_TTL_DAYS`
-  (default `30`). Expired rows are inert; prune them with a scheduled
+  (default `30`), `RESET_TOKEN_TTL_MINUTES` (default `60`), `APP_PORTAL_URL`
+  (fallback link host). Expired rows are inert; prune them with a scheduled
   `DELETE FROM auth_sessions WHERE expires_at < NOW() - INTERVAL '7 days'`.
 
 ---
@@ -249,6 +262,8 @@ Base path `/api/v1`. All responses are `{ success: boolean, ... }`; errors are
 | POST | `/auth/login` | public | returns short-lived access token + rotating refresh token |
 | POST | `/auth/refresh` | public | single-use rotation; replay revokes the whole session family |
 | POST | `/auth/logout` | public | revokes the session; its access token stops working immediately |
+| POST | `/auth/forgot-password` | public | generic response; emails a single-use reset link |
+| POST | `/auth/reset-password` | public | sets the password; revokes every session and token |
 | GET | `/tenant/branding` | public | theme tokens; never exposes pricing or IDs |
 | PUT | `/tenant/branding` | admin | colours, logo, typography, radius; invalidates cache |
 | POST | `/tools/estimate` | public, `enable_estimator` | tenant pricing matrix |
@@ -344,7 +359,8 @@ token or body — flipping a paid module is a data change, not a deploy.
   checklist, budget projection, customer card, change-order composer) →
   `/dashboard/projects/[id]/edit` → `/dashboard/change-orders` and
   `/dashboard/change-orders/[id]` (decision trail and discussion) →
-  `/dashboard/branding` (admin editor).
+  `/dashboard/branding` (admin editor). Password recovery lives at
+  `/forgot-password` and `/reset-password?token=…`, linked from the sign-in page.
 
 ```bash
 npm run portal:dev      # http://localhost:3000
@@ -406,10 +422,12 @@ comments appearing in the customer thread.
 
 - Portal has no automated browser suite yet — the end-to-end flow was verified
   with real HTTP requests against the built app, not a headless browser.
-- Password reset and MFA are not built. Customers receive a temporary password
-  from the administrator when they are onboarded, and there is no self-service
-  reset yet — add that before onboarding real customers at scale.
-- A "manage my sessions" UI is not built; logout and refresh rotation are.
+- MFA and a "manage my sessions" UI are not built; logout, refresh rotation and
+  password reset are.
+- Password-reset email uses the console transport. Wire an SMTP/API provider in
+  `src/services/mailer.ts` before onboarding real customers at scale.
+- File attachments on change orders are not built; the API intentionally accepts
+  JSON only.
 - Transactional email, CSV exports and the operator (platform-superadmin) console
   are out of scope for v1 per `SRS.txt`.
 - Real PostgreSQL/Redis integration is covered by CI; run it locally with

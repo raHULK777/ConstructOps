@@ -1,3 +1,4 @@
+import Link from 'next/link';
 import { redirect } from 'next/navigation';
 import { LoginForm } from '@/components/LoginForm';
 import { Notice } from '@/components/Notice';
@@ -17,13 +18,13 @@ const HIGHLIGHTS = [
 export default async function LoginPage({
   searchParams,
 }: {
-  searchParams: Promise<{ expired?: string }>;
+  searchParams: Promise<{ expired?: string; reset?: string }>;
 }) {
   const token = await getSessionToken();
   if (token) redirect('/dashboard');
 
   const branding = await fetchBranding();
-  const { expired } = await searchParams;
+  const { expired, reset } = await searchParams;
   const onPrimary = readableTextColor(branding.primaryColor);
 
   return (
@@ -86,7 +87,20 @@ export default async function LoginPage({
             {expired ? (
               <Notice tone="info">Your session expired. Sign in again to continue.</Notice>
             ) : null}
+            {reset ? (
+              <Notice tone="success">
+                Password updated. Sign in with your new password.
+              </Notice>
+            ) : null}
             <LoginForm />
+            <p className="text-center">
+              <Link
+                href="/forgot-password"
+                className="text-sm font-medium text-slate-500 hover:text-slate-800"
+              >
+                Forgot your password?
+              </Link>
+            </p>
           </div>
         </div>
       </section>

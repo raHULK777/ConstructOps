@@ -8,10 +8,14 @@ updates:
       day: monday
     open-pull-requests-limit: 5
     groups:
+      # Group routine upgrades; semver-major bumps arrive as individual PRs so
+      # each can go through its own migration (e.g. TypeScript 7, Tailwind 4).
       production-dependencies:
         dependency-type: production
+        update-types: ['minor', 'patch']
       development-dependencies:
         dependency-type: development
+        update-types: ['minor', 'patch']
 
   - package-ecosystem: github-actions
     directory: /

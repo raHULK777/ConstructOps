@@ -13,6 +13,7 @@
  */
 
 import { spawn, spawnSync } from 'node:child_process';
+import net from 'node:net';
 import { existsSync } from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -98,10 +99,29 @@ async function waitFor(url, { timeoutMs = 60_000, acceptRedirect = false } = {})
   return false;
 }
 
+function isPortFree(port) {
+  return new Promise((resolve) => {
+    const probe = net.createServer();
+    probe.once('error', () => resolve(false));
+    probe.once('listening', () => probe.close(() => resolve(true)));
+    probe.listen(port, '127.0.0.1');
+  });
+}
+
 async function main() {
   if (!existsSync(path.join(root, 'node_modules', 'tsx'))) {
     console.error('Dependencies are missing. Run `npm install` first.');
     process.exit(1);
+  }
+
+  for (const port of [8080, 3000]) {
+    if (!(await isPortFree(port))) {
+      fail(
+        `Port ${port} is already in use. Stop the process holding it (a previous run may ` +
+          'still be alive) and try again. On Windows: netstat -ano | findstr :' + port,
+      );
+      return;
+    }
   }
 
   log('starting in-memory API on :8080 (seeded demo tenants, no Docker needed)');

@@ -15,9 +15,10 @@ its own domain.
 | Check | Command | Status |
 |---|---|---|
 | Strict typecheck (src, scripts, tests) | `npm run typecheck` | passing |
-| Behaviour suite — 111 tests | `npm test` | passing |
+| Behaviour suite — 122 tests | `npm test` | passing |
 | OpenAPI contract ↔ mounted-route parity | `npm test` | passing |
 | Session rotation, reuse detection, logout revocation | `npm test` | passing |
+| Project workspace: onboarding, stages, decisions, comments | `npm test` + live UI run | passing |
 | Production build | `npm run build` | passing |
 | Live HTTP smoke over a real socket | `npm run smoke` | passing |
 | Portal production build (Next.js 16) | `npm run portal:build` | passing |
@@ -44,9 +45,9 @@ run; locally the API was verified with Redis absent, including the documented
 `503` readiness degradation and a full `smoke:live` pass in ~1 s.
 
 The automated suite substitutes PostgreSQL with `pg-mem` — which executes the
-**real** `migrations/001_tables.sql` and `002_indexes.sql`, including foreign
-keys, cascades, checks and unique constraints — and Redis with an in-memory
-double that can be forced to fail. All 111 tests drive the real Express pipeline,
+**real** `migrations/001_tables.sql` through `004_project_workspace.sql`, including
+foreign keys, cascades, checks and unique constraints — and Redis with an in-memory
+double that can be forced to fail. All 122 tests drive the real Express pipeline,
 real middleware and real SQL.
 
 ---
@@ -146,7 +147,7 @@ src/
   types/                       domain records, Zod contracts, Express augments
   utils/                       asyncHandler, errors, jwt, password, host, uuid
 portal/                        Next.js white-label portal (see "Portal" below)
-migrations/                    000 extensions · 001 tables · 002 indexes · 003 sessions
+migrations/                    000–004: extensions, tables, indexes, sessions, workspace
 scripts/                       migrate, seed, onboard, smoke, dev:all, dev:memory
 docs/openapi.yaml              OpenAPI 3.1 contract
 tests/                         support harness + unit + integration + contract
@@ -213,7 +214,29 @@ Two deliberate hardenings beyond the reference documents:
 
 ---
 
-## API surface
+## Project workspace
+
+- **Customer onboarding while creating a project.** One request can create the
+  client account (`customer`), the project and the initial stages in a single
+  transaction. An email that already belongs to a customer is linked instead of
+  duplicated; a staff email is rejected. The customer signs in with the
+  administrator-supplied temporary password and sees only their own projects.
+- **Custom stages per project.** Stages live in `project_stages` and are ordered.
+  Completing a stage recomputes the project's `progress_percentage` from
+  completed/total and moves `current_phase` to the next open stage; finishing the
+  last stage sets the phase to `Completed`. Administrators rename, reorder, add
+  and remove stages; field staff may only move status; customers read them.
+- **Budget.** The contract budget is `projects.estimated_cost`. The workspace adds
+  approved change orders to show the projected total, and pending value awaiting
+  the customer's decision.
+- **Change orders as a workflow.** Staff raise an order; the customer approves
+  (legal signature with timestamp and IP) or rejects with an optional reason.
+  Both roles share a comment thread on the order.
+- **Read-only customer experience.** The customer portal hides every editing
+  affordance; the API independently rejects customer writes, so hiding controls
+  is not the security boundary.
+
+---
 
 Base path `/api/v1`. All responses are `{ success: boolean, ... }`; errors are
 `{ success:false, error, code, requestId }`. Bodies must be
@@ -230,7 +253,12 @@ Base path `/api/v1`. All responses are `{ success: boolean, ... }`; errors are
 | PUT | `/tenant/branding` | admin | colours, logo, typography, radius; invalidates cache |
 | POST | `/tools/estimate` | public, `enable_estimator` | tenant pricing matrix |
 | GET | `/projects` | all roles | clients see only their own |
-| POST | `/projects` | admin | validates `clientId` belongs to this tenant |
+| POST | `/projects` | admin | creates the project, optionally onboards the customer and stages |
+| PUT | `/projects/:id` | admin | name, status, contract budget, customer assignment |
+| GET | `/projects/:id/stages` | all roles | ordered workflow; read-only for customers |
+| POST | `/projects/:id/stages` | admin | add a stage to this project |
+| PUT | `/projects/:id/stages/:stageId` | admin, field_staff | status (staff) or name/order (admin) |
+| DELETE | `/projects/:id/stages/:stageId` | admin | remove a stage |
 | GET | `/projects/:id` | all roles | opaque 404 for another client's project |
 | PUT | `/projects/:id/progress` | admin, field_staff | only phase + percentage |
 | DELETE | `/projects/:id` | admin | cascades change orders |
@@ -238,7 +266,9 @@ Base path `/api/v1`. All responses are `{ success: boolean, ... }`; errors are
 | POST | `/change-orders` | admin, field_staff | always created `pending` |
 | GET | `/change-orders/:id` | all roles | client-scoped join |
 | PUT | `/change-orders/:id/approve` | **client only** | records `signed_by`, `signed_at`, IP |
-| PUT | `/change-orders/:id/reject` | admin | pending only |
+| GET | `/change-orders/:id/comments` | all roles | discussion thread, tenant- and owner-scoped |
+| POST | `/change-orders/:id/comments` | all roles | post a comment |
+| PUT | `/change-orders/:id/reject` | admin, client (own) | pending only; optional reason becomes a comment |
 
 Role matrix is enforced route-by-route (`Security-policy.md`, §4):
 
@@ -308,9 +338,13 @@ token or body — flipping a paid module is a data change, not a deploy.
   claims in the session (Branding is admin-only, the signature button is
   client-only), but every decision is re-checked by the API. The portal decodes
   the JWT for display only; it does not verify it.
-- **Pages.** `/login` → `/dashboard` (portfolio stats, project cards) →
-  `/dashboard/projects/[id]` (phase, progress, change orders, signature) →
-  `/dashboard/branding` (admin editor with live preview).
+- **Pages.** `/login` → `/dashboard` (portfolio stats, project table, pending
+  decisions) → `/dashboard/projects` → `/dashboard/projects/new` (budget,
+  customer onboarding, stage template) → `/dashboard/projects/[id]` (stage
+  checklist, budget projection, customer card, change-order composer) →
+  `/dashboard/projects/[id]/edit` → `/dashboard/change-orders` and
+  `/dashboard/change-orders/[id]` (decision trail and discussion) →
+  `/dashboard/branding` (admin editor).
 
 ```bash
 npm run portal:dev      # http://localhost:3000
@@ -319,9 +353,10 @@ npm run portal:start    # serve the build on :3000
 ```
 
 Verified end-to-end over HTTP against the in-memory API: admin login, themed
-dashboard with real project data, progress update form, client signature with
-recorded audit trail, rejection of a second signature, and a live re-theme after
-`PUT /api/branding`.
+dashboard with real project data, creating a project with a new customer and four
+custom stages, completing a stage (progress derived to 25%), raising a change
+order, the customer signing in read-only, rejecting with a reason, and staff
+comments appearing in the customer thread.
 
 ---
 
@@ -371,8 +406,10 @@ recorded audit trail, rejection of a second signature, and a live re-theme after
 
 - Portal has no automated browser suite yet — the end-to-end flow was verified
   with real HTTP requests against the built app, not a headless browser.
-- Password reset, MFA and a "manage my sessions" UI are not built. Logout and
-  refresh rotation are implemented; the JWT itself is short-lived by design.
+- Password reset and MFA are not built. Customers receive a temporary password
+  from the administrator when they are onboarded, and there is no self-service
+  reset yet — add that before onboarding real customers at scale.
+- A "manage my sessions" UI is not built; logout and refresh rotation are.
 - Transactional email, CSV exports and the operator (platform-superadmin) console
   are out of scope for v1 per `SRS.txt`.
 - Real PostgreSQL/Redis integration is covered by CI; run it locally with

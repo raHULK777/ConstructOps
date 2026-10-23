@@ -25,12 +25,26 @@ export interface PublicBranding {
 export interface Project {
   id: string;
   clientId: string | null;
+  clientName: string | null;
+  clientEmail: string | null;
+  clientPhone: string | null;
   projectName: string;
   status: ProjectStatus;
   currentPhase: string | null;
   progressPercentage: number;
   estimatedCost: number;
   updatedAt: string;
+}
+
+export type StageStatus = 'pending' | 'in_progress' | 'completed';
+
+export interface ProjectStage {
+  id: string;
+  projectId: string;
+  name: string;
+  position: number;
+  status: StageStatus;
+  completedAt: string | null;
 }
 
 export interface ChangeOrder {
@@ -41,8 +55,22 @@ export interface ChangeOrder {
   costImpact: number;
   status: ChangeOrderStatus;
   signedBy: string | null;
+  signedByName: string | null;
   signedAt: string | null;
   ipAddress: string | null;
+  rejectedBy: string | null;
+  rejectedByName: string | null;
+  rejectedAt: string | null;
+  createdAt: string;
+}
+
+export interface ChangeOrderComment {
+  id: string;
+  changeOrderId: string;
+  authorId: string;
+  authorName: string;
+  authorRole: Role;
+  body: string;
   createdAt: string;
 }
 

@@ -75,11 +75,16 @@ export async function insertStage(
   projectId: string,
   input: StageInsert,
 ): Promise<StageRow> {
+  // completed_at is computed here rather than with `CASE WHEN $5 = 'completed'`:
+  // PostgreSQL cannot deduce one type for a parameter used both as a varchar
+  // value and in a text comparison.
+  const completedAt = input.status === 'completed' ? new Date().toISOString() : null;
+
   const { rows } = await db.query<StageRow>(
     `INSERT INTO project_stages (tenant_id, project_id, name, position, status, completed_at)
-     VALUES ($1, $2, $3, $4, $5, CASE WHEN $5 = 'completed' THEN NOW() ELSE NULL END)
+     VALUES ($1, $2, $3, $4, $5, $6)
      RETURNING ${STAGE_COLUMNS}`,
-    [tenantId, projectId, input.name, input.position, input.status],
+    [tenantId, projectId, input.name, input.position, input.status, completedAt],
   );
   const row = rows[0];
   if (!row) throw new Error('Stage insert returned no row.');
@@ -113,7 +118,11 @@ export async function updateStageRow(
   if (update.status !== undefined) {
     values.push(update.status);
     assignments.push(`status = $${values.length}`);
-    assignments.push(`completed_at = CASE WHEN $${values.length} = 'completed' THEN NOW() ELSE NULL END`);
+
+    // Keep the timestamp parameter separate from the status parameter: reusing
+    // one placeholder as both varchar and text is rejected by PostgreSQL.
+    values.push(update.status === 'completed' ? new Date().toISOString() : null);
+    assignments.push(`completed_at = $${values.length}`);
   }
 
   values.push(tenantId, projectId, stageId);

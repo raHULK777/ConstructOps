@@ -284,7 +284,10 @@ recorded audit trail, rejection of a second signature, and a live re-theme after
 ## Operational notes
 
 - **Migrations** are checksummed; editing an applied file aborts the run. A
-  PostgreSQL advisory lock prevents concurrent deploys from racing.
+  PostgreSQL advisory lock prevents concurrent deploys from racing. The migration,
+  seed and onboarding tools are TypeScript (`tsx`), so run them from a release job
+  that installs dev dependencies (`npm ci --include=dev`); the long-running server
+  itself only needs `npm ci --omit=dev` plus the compiled `dist/`.
 - **Redis is optional at runtime.** The client uses `enableOfflineQueue: false`
   and `maxRetriesPerRequest: 1`, so a down cache fails in milliseconds instead of
   stalling on the socket timeout. `tenantResolver` also pauses cache access for

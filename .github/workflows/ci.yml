@@ -106,7 +106,9 @@ jobs:
           cache: npm
 
       - name: Install
-        run: npm ci --no-audit --no-fund
+        # NODE_ENV=production is set for the runtime; the migration/seed/smoke
+        # tooling is TypeScript and needs devDependencies present in this job.
+        run: npm ci --no-audit --no-fund --include=dev
 
       - name: Migrate
         run: npm run migrate

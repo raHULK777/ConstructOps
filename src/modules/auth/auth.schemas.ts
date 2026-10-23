@@ -8,4 +8,9 @@ export const loginBodySchema = z.strictObject({
   password: z.string().min(1).max(200),
 });
 
+export const refreshBodySchema = z.strictObject({
+  refreshToken: z.string().min(20).max(512),
+});
+
 export type LoginBody = z.infer<typeof loginBodySchema>;
+export type RefreshBody = z.infer<typeof refreshBodySchema>;

@@ -12,6 +12,7 @@ const BASE_ENV: NodeJS.ProcessEnv = {
   JWT_EXPIRES_IN: '1h',
   JWT_ISSUER: 'constructops',
   JWT_AUDIENCE: 'constructops-api',
+  REFRESH_TOKEN_TTL_DAYS: '30',
   PLATFORM_ROOT_DOMAIN: 'constructops.test',
   TRUST_PROXY: 'false',
   CORS_ORIGINS: '',

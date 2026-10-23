@@ -1,5 +1,6 @@
 import Link from 'next/link';
 import type { ReactNode } from 'react';
+import { SessionKeeper } from '@/components/SessionKeeper';
 import { SignOutButton } from '@/components/SignOutButton';
 import { readableTextColor } from '@/lib/branding';
 import { fetchBranding } from '@/lib/branding-server';
@@ -24,6 +25,7 @@ export default async function DashboardLayout({ children }: { children: ReactNod
 
   return (
     <div className="min-h-screen">
+      <SessionKeeper />
       <header style={{ backgroundColor: branding.primaryColor, color: onPrimary }}>
         <div className="mx-auto flex max-w-6xl flex-wrap items-center gap-x-6 gap-y-3 px-4 py-3 sm:px-6">
           <Link href="/dashboard" className="flex items-center gap-3">

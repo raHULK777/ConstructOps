@@ -1,3 +1,4 @@
+import { createHash, randomUUID } from 'node:crypto';
 import bcrypt from 'bcryptjs';
 import type { Db } from '../../src/config/database';
 import type { UserRole } from '../../src/types/domain';
@@ -111,6 +112,31 @@ export async function insertProject(
   const row = rows[0];
   if (!row) throw new Error('Project fixture insert failed.');
   return row.id;
+}
+
+export interface SessionFixtureOptions {
+  expiresAt?: string;
+  revokedAt?: string | null;
+}
+
+/** Creates a live session row so a hand-signed access token can authenticate. */
+export async function insertSession(
+  db: Db,
+  tenantId: string,
+  userId: string,
+  options: SessionFixtureOptions = {},
+): Promise<string> {
+  const id = randomUUID();
+  const hash = createHash('sha256').update(randomUUID()).digest('hex');
+  const expiresAt = options.expiresAt ?? new Date(Date.now() + 60 * 60 * 1000).toISOString();
+
+  await db.query(
+    `INSERT INTO auth_sessions (id, tenant_id, user_id, refresh_token_hash, expires_at, revoked_at)
+     VALUES ($1,$2,$3,$4,$5,$6)`,
+    [id, tenantId, userId, hash, expiresAt, options.revokedAt ?? null],
+  );
+
+  return id;
 }
 
 export interface ChangeOrderFixtureOptions {

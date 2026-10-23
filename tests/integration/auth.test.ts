@@ -2,7 +2,7 @@ import request from 'supertest';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { signAccessToken } from '../../src/utils/jwt';
 import { HOSTS, bearer, createTestContext, login, type TestContext } from '../support/testApp';
-import { insertTenant, insertUser } from '../support/fixtures';
+import { insertSession, insertTenant, insertUser } from '../support/fixtures';
 import { TEST_PASSWORD } from '../support/testEnv';
 
 describe('authentication', () => {
@@ -117,9 +117,12 @@ describe('authentication', () => {
     const clientId = rows[0]?.id;
     if (!clientId) throw new Error('client fixture missing');
 
-    // An attacker who could re-sign tokens would claim admin. The database wins.
+    // A token is only usable if its session is live; an attacker able to re-sign
+    // would still need a valid session id, and the database role always wins.
+    const sessionId = await insertSession(ctx.db, alphaTenantId, clientId);
     const forged = signAccessToken(
       { id: clientId, tenant_id: alphaTenantId, email: 'client@alpha.test', role: 'admin' },
+      sessionId,
       ctx.env,
     );
 

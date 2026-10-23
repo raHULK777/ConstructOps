@@ -125,6 +125,72 @@ paths:
         '429':
           $ref: '#/components/responses/TooManyRequests'
 
+  /api/v1/auth/refresh:
+    post:
+      tags: [Authentication]
+      operationId: refreshSession
+      summary: Rotate a refresh token
+      description: |
+        Exchanges a refresh token for a new access token and a new refresh token.
+        The presented token is revoked on use (rotation). Replaying a consumed
+        token is treated as theft and revokes every active session for that user.
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/RefreshRequest'
+      responses:
+        '200':
+          description: Rotated credentials.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/LoginResponse'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/TenantNotFound'
+        '415':
+          $ref: '#/components/responses/UnsupportedMediaType'
+        '429':
+          $ref: '#/components/responses/TooManyRequests'
+
+  /api/v1/auth/logout:
+    post:
+      tags: [Authentication]
+      operationId: logoutSession
+      summary: Revoke a session
+      description: |
+        Revokes the server-side session bound to the refresh token. Idempotent and
+        always `200`, so an unknown token cannot be distinguished from a valid
+        one. Access tokens bound to that session stop working immediately.
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/RefreshRequest'
+      responses:
+        '200':
+          description: Session revoked (or already inactive).
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SuccessMessage'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '404':
+          $ref: '#/components/responses/TenantNotFound'
+        '415':
+          $ref: '#/components/responses/UnsupportedMediaType'
+        '429':
+          $ref: '#/components/responses/TooManyRequests'
+
   /api/v1/tenant/branding:
     get:
       tags: [Branding]
@@ -527,9 +593,12 @@ components:
       scheme: bearer
       bearerFormat: JWT
       description: |
-        HS256 access token issued by `/api/v1/auth/login`. Claims:
-        `sub` (user id), `tenant_id`, `role`, `email`, plus `iss`/`aud`/`exp`.
+        HS256 access token issued by `/api/v1/auth/login` or
+        `/api/v1/auth/refresh`. Claims: `sub` (user id), `tenant_id`, `role`,
+        `email`, `sid` (server-side session id), plus `iss`/`aud`/`exp`.
         The `tenant_id` claim must match the tenant resolved from the Host header.
+        The `sid` session must still be active, so logout revokes access
+        immediately rather than at token expiry.
 
   parameters:
     IdPath:
@@ -726,18 +795,46 @@ components:
 
     LoginResponse:
       type: object
-      required: [success, token, user, tenantBranding]
+      required:
+        - success
+        - token
+        - refreshToken
+        - accessTokenExpiresAt
+        - refreshTokenExpiresAt
+        - user
+        - tenantBranding
       properties:
         success:
           type: boolean
           const: true
         token:
           type: string
-          description: HS256 JWT.
+          description: Short-lived HS256 access token (default 15 minutes).
+        refreshToken:
+          type: string
+          description: |
+            Rotating refresh credential. Store it server-side only; it is single
+            use and revoked when exchanged.
+        accessTokenExpiresAt:
+          type: string
+          format: date-time
+        refreshTokenExpiresAt:
+          type: string
+          format: date-time
         user:
           $ref: '#/components/schemas/LoginUser'
         tenantBranding:
           $ref: '#/components/schemas/LoginTenantBranding'
+
+    RefreshRequest:
+      type: object
+      required: [refreshToken]
+      additionalProperties: false
+      properties:
+        refreshToken:
+          type: string
+          minLength: 20
+          maxLength: 512
 
     BrandingConfig:
       type: object

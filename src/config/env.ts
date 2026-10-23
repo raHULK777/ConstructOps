@@ -21,9 +21,12 @@ const envSchema = z.object({
   REDIS_URL: z.url(),
 
   JWT_SECRET: z.string().min(32, 'JWT_SECRET must be at least 32 characters'),
-  JWT_EXPIRES_IN: z.string().min(2).default('12h'),
+  JWT_EXPIRES_IN: z.string().min(2).default('15m'),
   JWT_ISSUER: z.string().min(1).default('constructops'),
   JWT_AUDIENCE: z.string().min(1).default('constructops-api'),
+
+  /** Lifetime of a refresh token / server-side session. */
+  REFRESH_TOKEN_TTL_DAYS: z.coerce.number().int().min(1).max(365).default(30),
 
   PLATFORM_ROOT_DOMAIN: z.string().min(1).optional(),
 
@@ -48,6 +51,7 @@ export interface Env {
   jwtExpiresIn: string;
   jwtIssuer: string;
   jwtAudience: string;
+  refreshTokenTtlDays: number;
   platformRootDomain: string | null;
   trustProxy: boolean | number | string;
   corsOrigins: string[];
@@ -90,6 +94,7 @@ export function createEnv(raw: NodeJS.ProcessEnv = process.env): Env {
     jwtExpiresIn: value.JWT_EXPIRES_IN,
     jwtIssuer: value.JWT_ISSUER,
     jwtAudience: value.JWT_AUDIENCE,
+    refreshTokenTtlDays: value.REFRESH_TOKEN_TTL_DAYS,
     platformRootDomain: rootDomain,
     trustProxy: parseTrustProxy(value.TRUST_PROXY),
     corsOrigins: value.CORS_ORIGINS.split(',')

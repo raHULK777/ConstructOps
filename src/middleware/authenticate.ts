@@ -1,7 +1,7 @@
 import type { RequestHandler } from 'express';
 import type { Db } from '../config/database';
 import type { Env } from '../config/env';
-import { findUserById } from '../modules/auth/auth.repository';
+import { findUserForSession } from '../modules/auth/session.repository';
 import { asyncHandler } from '../utils/asyncHandler';
 import { requireTenant } from '../utils/context';
 import { tenantScopeMismatch, unauthorized } from '../utils/errors';
@@ -13,11 +13,14 @@ export interface AuthenticateDeps {
 }
 
 /**
- * Three sequential guarantees, all mandatory (Security-policy.md, section 3-5):
+ * Three sequential guarantees, all mandatory (Security-policy.md, sections 3-5):
  *   1. a syntactically valid, correctly signed, unexpired HS256 token;
  *   2. a token tenant claim equal to the tenant resolved from the request host;
- *   3. a user that still exists in *that* tenant, whose current role is
- *      authoritative over the (possibly stale) role claim in the token.
+ *   3. a live server-side session and an existing user in *that* tenant, whose
+ *      current role is authoritative over the (possibly stale) claim.
+ *
+ * Step 3 is what makes logout revoke access immediately: the session row is
+ * checked on every request, not just when the refresh token is exchanged.
  */
 export function authenticate(deps: AuthenticateDeps): RequestHandler {
   return asyncHandler(async (req, _res, next) => {
@@ -36,7 +39,7 @@ export function authenticate(deps: AuthenticateDeps): RequestHandler {
       throw tenantScopeMismatch();
     }
 
-    const user = await findUserById(deps.db, tenant.id, claims.sub);
+    const user = await findUserForSession(deps.db, tenant.id, claims.sub, claims.sid);
     if (!user) {
       throw unauthorized();
     }

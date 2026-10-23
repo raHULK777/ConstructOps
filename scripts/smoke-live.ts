@@ -81,7 +81,10 @@ function call(options: {
   });
 }
 
-async function login(host: string, email: string): Promise<string> {
+async function login(
+  host: string,
+  email: string,
+): Promise<{ token: string; refreshToken: string }> {
   const response = await call({
     method: 'POST',
     path: '/api/v1/auth/login',
@@ -90,8 +93,10 @@ async function login(host: string, email: string): Promise<string> {
   });
   assert.equal(response.status, 200, `login failed for ${email}: ${JSON.stringify(response.body)}`);
   const token = response.body?.token;
+  const refreshToken = response.body?.refreshToken;
   assert.equal(typeof token, 'string');
-  return token as string;
+  assert.equal(typeof refreshToken, 'string');
+  return { token: token as string, refreshToken: refreshToken as string };
 }
 
 function pass(step: string): void {
@@ -125,7 +130,8 @@ async function main(): Promise<void> {
   assert.equal(tenant.companyName, 'Alpha Builders Pro');
   pass('GET  /api/v1/tenant/branding');
 
-  const adminToken = await login(ALPHA_HOST, 'admin@alphabuilders.com');
+  const adminSession = await login(ALPHA_HOST, 'admin@alphabuilders.com');
+  const adminToken = adminSession.token;
   pass('POST /api/v1/auth/login (admin)');
 
   // Exercising PUT branding proves cache invalidation deletes the Redis entry,
@@ -175,7 +181,8 @@ async function main(): Promise<void> {
   assert.equal(progress.status, 200, JSON.stringify(progress.body));
   pass('PUT  /api/v1/projects/:id/progress');
 
-  const clientToken = await login(ALPHA_HOST, 'client@alphabuilders.com');
+  const clientSession = await login(ALPHA_HOST, 'client@alphabuilders.com');
+  const clientToken = clientSession.token;
   pass('POST /api/v1/auth/login (client)');
 
   const orders = await call({
@@ -218,10 +225,12 @@ async function main(): Promise<void> {
   assert.equal(duplicate.status, 409);
   pass('PUT  approve twice -> 409');
 
+  const summitSession = await login(SUMMIT_HOST, 'admin@summitrenovations.com');
+
   const crossTenant = await call({
     path: '/api/v1/projects',
     host: ALPHA_HOST,
-    token: await login(SUMMIT_HOST, 'admin@summitrenovations.com'),
+    token: summitSession.token,
   });
   assert.equal(crossTenant.status, 403);
   assert.equal(
@@ -233,7 +242,7 @@ async function main(): Promise<void> {
   const gated = await call({
     path: '/api/v1/change-orders',
     host: SUMMIT_HOST,
-    token: await login(SUMMIT_HOST, 'admin@summitrenovations.com'),
+    token: summitSession.token,
   });
   assert.equal(gated.status, 403);
   assert.equal(gated.body?.code, 'FEATURE_DISABLED');
@@ -242,6 +251,55 @@ async function main(): Promise<void> {
   const unknownHost = await call({ path: '/api/v1/tenant/branding', host: 'nobody.constructops.test' });
   assert.equal(unknownHost.status, 404);
   pass('unknown host -> 404');
+
+  // Rotation: the new pair replaces the old one, and the old access token dies
+  // with its session. Logout then revokes the rotated session immediately.
+  const rotationLogin = await login(ALPHA_HOST, 'admin@alphabuilders.com');
+  const rotated = await call({
+    method: 'POST',
+    path: '/api/v1/auth/refresh',
+    host: ALPHA_HOST,
+    body: { refreshToken: rotationLogin.refreshToken },
+  });
+  assert.equal(rotated.status, 200, JSON.stringify(rotated.body));
+  const rotatedAccess = rotated.body?.token;
+  const rotatedRefresh = rotated.body?.refreshToken;
+  assert.equal(typeof rotatedAccess, 'string');
+  assert.equal(typeof rotatedRefresh, 'string');
+  assert.notEqual(rotatedRefresh, rotationLogin.refreshToken);
+
+  const staleAccess = await call({
+    path: '/api/v1/projects',
+    host: ALPHA_HOST,
+    token: rotationLogin.token,
+  });
+  assert.equal(staleAccess.status, 401);
+
+  const replay = await call({
+    method: 'POST',
+    path: '/api/v1/auth/refresh',
+    host: ALPHA_HOST,
+    body: { refreshToken: rotationLogin.refreshToken },
+  });
+  assert.equal(replay.status, 401);
+  pass('POST /api/v1/auth/refresh (rotation + replay rejection)');
+
+  const revokedLogin = await login(ALPHA_HOST, 'admin@alphabuilders.com');
+  const logout = await call({
+    method: 'POST',
+    path: '/api/v1/auth/logout',
+    host: ALPHA_HOST,
+    body: { refreshToken: revokedLogin.refreshToken },
+  });
+  assert.equal(logout.status, 200);
+
+  const afterLogout = await call({
+    path: '/api/v1/projects',
+    host: ALPHA_HOST,
+    token: revokedLogin.token,
+  });
+  assert.equal(afterLogout.status, 401);
+  pass('POST /api/v1/auth/logout (immediate access revocation)');
 
   console.log('smoke:live PASS');
 }

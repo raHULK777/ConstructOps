@@ -9,6 +9,8 @@ export const TENANT_HOST_OVERRIDE =
   process.env.TENANT_HOST_OVERRIDE ?? 'alpha-builders.constructops.test';
 
 export const SESSION_COOKIE = 'co_session';
+export const REFRESH_COOKIE = 'co_refresh';
 
-/** Matches the API's default JWT lifetime (12h). */
-export const SESSION_MAX_AGE_SECONDS = 60 * 60 * 12;
+/** Fallback only; real max-age comes from the API's token expiries. */
+export const SESSION_MAX_AGE_SECONDS = 60 * 15;
+export const REFRESH_MAX_AGE_SECONDS = 60 * 60 * 24 * 30;

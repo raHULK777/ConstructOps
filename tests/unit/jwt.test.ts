@@ -18,19 +18,21 @@ function makeUser(role: AuthUser['role'] = 'admin'): AuthUser {
 }
 
 describe('access tokens', () => {
-  it('round-trips the tenant and role claims', () => {
+  it('round-trips the tenant, role and session claims', () => {
     const user = makeUser('field_staff');
-    const claims = verifyAccessToken(signAccessToken(user, env), env);
+    const sessionId = randomUUID();
+    const claims = verifyAccessToken(signAccessToken(user, sessionId, env), env);
 
     expect(claims.sub).toBe(user.id);
     expect(claims.tenant_id).toBe(user.tenant_id);
     expect(claims.role).toBe('field_staff');
     expect(claims.email).toBe(user.email);
+    expect(claims.sid).toBe(sessionId);
     expect(claims.exp).toBeGreaterThan(claims.iat);
   });
 
   it('rejects a tampered signature', () => {
-    const token = signAccessToken(makeUser(), env);
+    const token = signAccessToken(makeUser(), randomUUID(), env);
     const tampered = `${token.slice(0, -3)}abc`;
 
     expect(() => verifyAccessToken(tampered, env)).toThrowError(/Access token missing or expired/);
@@ -39,7 +41,7 @@ describe('access tokens', () => {
   it('rejects tokens issued for another audience or issuer', () => {
     const user = makeUser();
     const foreign = jwt.sign(
-      { tenant_id: user.tenant_id, role: 'admin', email: user.email },
+      { tenant_id: user.tenant_id, role: 'admin', email: user.email, sid: randomUUID() },
       env.jwtSecret,
       { algorithm: 'HS256', subject: user.id, issuer: 'someone-else', audience: env.jwtAudience },
     );
@@ -47,10 +49,27 @@ describe('access tokens', () => {
     expect(() => verifyAccessToken(foreign, env)).toThrowError(/Access token missing or expired/);
   });
 
+  it('rejects tokens without a session claim', () => {
+    const user = makeUser();
+    const noSession = jwt.sign(
+      { tenant_id: user.tenant_id, role: 'admin', email: user.email },
+      env.jwtSecret,
+      {
+        algorithm: 'HS256',
+        subject: user.id,
+        issuer: env.jwtIssuer,
+        audience: env.jwtAudience,
+        expiresIn: '1h',
+      },
+    );
+
+    expect(() => verifyAccessToken(noSession, env)).toThrowError(/Access token missing or expired/);
+  });
+
   it('rejects expired tokens', () => {
     const user = makeUser();
     const expired = jwt.sign(
-      { tenant_id: user.tenant_id, role: 'admin', email: user.email },
+      { tenant_id: user.tenant_id, role: 'admin', email: user.email, sid: randomUUID() },
       env.jwtSecret,
       {
         algorithm: 'HS256',
@@ -67,7 +86,7 @@ describe('access tokens', () => {
   it('rejects unsigned ("alg: none") tokens', () => {
     const user = makeUser();
     const unsigned = jwt.sign(
-      { tenant_id: user.tenant_id, role: 'admin', email: user.email },
+      { tenant_id: user.tenant_id, role: 'admin', email: user.email, sid: randomUUID() },
       '',
       { algorithm: 'none', subject: user.id, issuer: env.jwtIssuer, audience: env.jwtAudience },
     );

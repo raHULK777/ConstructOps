@@ -50,6 +50,22 @@ export async function login(
   email: string,
   password: string = TEST_PASSWORD,
 ): Promise<string> {
+  const session = await loginSession(app, host, email, password);
+  return session.token;
+}
+
+export interface LoginSession {
+  token: string;
+  refreshToken: string;
+  user: { id: string; email: string; role: string };
+}
+
+export async function loginSession(
+  app: Express,
+  host: string,
+  email: string,
+  password: string = TEST_PASSWORD,
+): Promise<LoginSession> {
   const response = await request(app)
     .post('/api/v1/auth/login')
     .set('Host', host)
@@ -58,7 +74,12 @@ export async function login(
   if (response.status !== 200) {
     throw new Error(`Login failed (${response.status}): ${JSON.stringify(response.body)}`);
   }
-  return response.body.token as string;
+
+  return {
+    token: response.body.token as string,
+    refreshToken: response.body.refreshToken as string,
+    user: response.body.user as LoginSession['user'],
+  };
 }
 
 export function bearer(token: string): { Authorization: string } {

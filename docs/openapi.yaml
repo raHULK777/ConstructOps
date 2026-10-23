@@ -1,0 +1,1153 @@
+openapi: 3.1.0
+
+info:
+  title: ConstructOps Engine API
+  version: 1.0.0
+  summary: Multi-tenant, white-label construction operations API.
+  description: |
+    ## Tenant selection
+
+    The tenant is resolved from the **Host header**, never from the path, body or
+    token. Point the `tenantHost` server variable at the workspace host
+    (`alpha-builders.constructops.io` or a verified custom domain). Any bearer
+    token minted for a different tenant is rejected with `403`.
+
+    ## Conventions
+
+    - Every response is a JSON object containing `success` (boolean).
+    - Errors are `{ success: false, error, code, requestId }`.
+    - Request bodies must be `application/json`; multipart is rejected with `415`.
+    - Path identifiers must be UUIDv4; malformed identifiers fail with `400`.
+    - Role rules are additive to the tenant scope: `admin`, `field_staff`, `client`.
+    - Premium routes require the tenant feature flag, otherwise `403 FEATURE_DISABLED`.
+
+servers:
+  - url: https://{tenantHost}
+    description: Tenant workspace (subdomain or verified custom domain)
+    variables:
+      tenantHost:
+        default: alpha-builders.constructops.io
+        description: Host that identifies the tenant workspace.
+  - url: http://localhost:8080
+    description: Local development
+
+tags:
+  - name: Platform
+    description: Liveness and readiness probes (not tenant-scoped).
+  - name: Authentication
+    description: Password login and token issuance.
+  - name: Branding
+    description: White-label theme tokens for the portal shell.
+  - name: Estimator
+    description: Public quotation tool driven by the tenant pricing matrix.
+  - name: Projects
+    description: Construction projects, phases and progress.
+  - name: Change Orders
+    description: Cost revisions and the client approval audit loop.
+
+security:
+  - bearerAuth: []
+
+paths:
+  /healthz:
+    get:
+      tags: [Platform]
+      operationId: getLiveness
+      summary: Liveness probe
+      description: Returns process liveness. Not tenant-scoped and not rate-limited.
+      security: []
+      responses:
+        '200':
+          description: Process is alive.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Health'
+        '429':
+          $ref: '#/components/responses/TooManyRequests'
+
+  /readyz:
+    get:
+      tags: [Platform]
+      operationId: getReadiness
+      summary: Readiness probe
+      description: |
+        Reports dependency health. Returns `503` unless PostgreSQL **and** Redis
+        both answer. Redis being down degrades the API but fails readiness, so
+        orchestration can alert on it.
+      security: []
+      responses:
+        '200':
+          description: All dependencies reachable.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Readiness'
+        '503':
+          description: At least one dependency is down.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Readiness'
+
+  /api/v1/auth/login:
+    post:
+      tags: [Authentication]
+      operationId: login
+      summary: Exchange credentials for an access token
+      description: |
+        The tenant is resolved from the Host header first; credentials are only
+        checked inside that tenant. Unknown emails and wrong passwords return the
+        same `401` after equivalent hashing work, so account existence is not
+        observable through timing or wording.
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/LoginRequest'
+      responses:
+        '200':
+          description: Authenticated.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/LoginResponse'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/TenantNotFound'
+        '415':
+          $ref: '#/components/responses/UnsupportedMediaType'
+        '429':
+          $ref: '#/components/responses/TooManyRequests'
+
+  /api/v1/tenant/branding:
+    get:
+      tags: [Branding]
+      operationId: getTenantBranding
+      summary: Read public white-label branding
+      description: |
+        Safe to call before authentication — the portal shell uses it to theme the
+        login page. Pricing matrices, user data and the tenant id are never
+        included.
+      security: []
+      responses:
+        '200':
+          description: Public branding and feature flags.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/BrandingResponse'
+        '404':
+          $ref: '#/components/responses/TenantNotFound'
+
+    put:
+      tags: [Branding]
+      operationId: updateTenantBranding
+      summary: Update branding for the current tenant
+      description: |
+        Partial update: only supplied fields change. A nested `brandingConfig`
+        object is merged with the stored configuration, and the tenant cache is
+        invalidated so the change is visible on the next request.
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/UpdateBrandingRequest'
+      responses:
+        '200':
+          description: Branding updated.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/BrandingResponse'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '415':
+          $ref: '#/components/responses/UnsupportedMediaType'
+
+  /api/v1/tools/estimate:
+    post:
+      tags: [Estimator]
+      operationId: estimateProject
+      summary: Quote a project from the tenant pricing matrix
+      description: |
+        Public lead-generation tool. Rates, material multipliers and the
+        contingency percentage come from the resolved tenant only, so the same
+        request produces different quotes in different workspaces.
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/EstimateRequest'
+      responses:
+        '200':
+          description: Calculated estimate.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/EstimateResponse'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '403':
+          $ref: '#/components/responses/FeatureDisabled'
+        '415':
+          $ref: '#/components/responses/UnsupportedMediaType'
+        '429':
+          $ref: '#/components/responses/TooManyRequests'
+
+  /api/v1/projects:
+    get:
+      tags: [Projects]
+      operationId: listProjects
+      summary: List projects visible to the caller
+      description: |
+        `admin` and `field_staff` see every project in the tenant. `client` is
+        additionally filtered to `client_id = session user`.
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: status
+          in: query
+          required: false
+          schema:
+            $ref: '#/components/schemas/ProjectStatus'
+        - name: limit
+          in: query
+          required: false
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 200
+            default: 50
+      responses:
+        '200':
+          description: Projects in the caller's scope.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ProjectListResponse'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+
+    post:
+      tags: [Projects]
+      operationId: createProject
+      summary: Create a project
+      description: |
+        Administrator only. A supplied `clientId` must reference a `client` user
+        of the same tenant, otherwise `400`.
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateProjectRequest'
+      responses:
+        '201':
+          description: Project created.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ProjectResponse'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '415':
+          $ref: '#/components/responses/UnsupportedMediaType'
+
+  /api/v1/projects/{id}:
+    parameters:
+      - $ref: '#/components/parameters/IdPath'
+    get:
+      tags: [Projects]
+      operationId: getProject
+      summary: Get one project
+      description: |
+        Clients may only read projects where they are the assigned client; any
+        other identifier yields `404`, so existence is not confirmed.
+      security:
+        - bearerAuth: []
+      responses:
+        '200':
+          description: Project record.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ProjectResponse'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+    delete:
+      tags: [Projects]
+      operationId: deleteProject
+      summary: Delete a project
+      description: Administrator only. Change orders on the project cascade away.
+      security:
+        - bearerAuth: []
+      responses:
+        '200':
+          description: Project deleted.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SuccessMessage'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+  /api/v1/projects/{id}/progress:
+    parameters:
+      - $ref: '#/components/parameters/IdPath'
+    put:
+      tags: [Projects]
+      operationId: updateProjectProgress
+      summary: Update phase and progress
+      description: |
+        `admin` or `field_staff`. Only `current_phase` and `progress_percentage`
+        are writable through this route; both are required.
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/UpdateProgressRequest'
+      responses:
+        '200':
+          description: Progress updated.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ProgressResponse'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '415':
+          $ref: '#/components/responses/UnsupportedMediaType'
+
+  /api/v1/change-orders:
+    get:
+      tags: [Change Orders]
+      operationId: listChangeOrders
+      summary: List change orders visible to the caller
+      description: |
+        Requires the `enable_change_orders` feature. Clients see only orders whose
+        project assigns them as `client_id`.
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: projectId
+          in: query
+          required: false
+          schema:
+            type: string
+            format: uuid
+        - name: status
+          in: query
+          required: false
+          schema:
+            $ref: '#/components/schemas/ChangeOrderStatus'
+        - name: limit
+          in: query
+          required: false
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 200
+            default: 50
+      responses:
+        '200':
+          description: Change orders in the caller's scope.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ChangeOrderListResponse'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/FeatureDisabled'
+
+    post:
+      tags: [Change Orders]
+      operationId: createChangeOrder
+      summary: Draft a change order
+      description: |
+        `admin` or `field_staff`. Orders are always created `pending`; the client
+        signs them through the approve route.
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateChangeOrderRequest'
+      responses:
+        '201':
+          description: Change order created.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ChangeOrderResponse'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/FeatureDisabled'
+        '415':
+          $ref: '#/components/responses/UnsupportedMediaType'
+
+  /api/v1/change-orders/{id}:
+    parameters:
+      - $ref: '#/components/parameters/IdPath'
+    get:
+      tags: [Change Orders]
+      operationId: getChangeOrder
+      summary: Get one change order
+      security:
+        - bearerAuth: []
+      responses:
+        '200':
+          description: Change order record.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ChangeOrderResponse'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/FeatureDisabled'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+  /api/v1/change-orders/{id}/approve:
+    parameters:
+      - $ref: '#/components/parameters/IdPath'
+    put:
+      tags: [Change Orders]
+      operationId: approveChangeOrder
+      summary: Sign and approve a change order
+      description: |
+        Strictly `client`, strictly on a project where they are the assigned
+        client, strictly while `pending`. The signature records `signed_by`,
+        `signed_at` and the client IP. A repeat call returns `409`.
+        No request body is required.
+      security:
+        - bearerAuth: []
+      responses:
+        '200':
+          description: Approval recorded.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApproveResponse'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/FeatureDisabled'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          $ref: '#/components/responses/Conflict'
+
+  /api/v1/change-orders/{id}/reject:
+    parameters:
+      - $ref: '#/components/parameters/IdPath'
+    put:
+      tags: [Change Orders]
+      operationId: rejectChangeOrder
+      summary: Reject a pending change order
+      description: Administrator only. Rejection is not a client signature.
+      security:
+        - bearerAuth: []
+      responses:
+        '200':
+          description: Change order rejected.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ChangeOrderResponse'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          $ref: '#/components/responses/Conflict'
+
+components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+      description: |
+        HS256 access token issued by `/api/v1/auth/login`. Claims:
+        `sub` (user id), `tenant_id`, `role`, `email`, plus `iss`/`aud`/`exp`.
+        The `tenant_id` claim must match the tenant resolved from the Host header.
+
+  parameters:
+    IdPath:
+      name: id
+      in: path
+      required: true
+      description: UUIDv4 identifier.
+      schema:
+        type: string
+        format: uuid
+        pattern: '^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$'
+
+  responses:
+    BadRequest:
+      description: Malformed body, query or path parameter.
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorEnvelope'
+    Unauthorized:
+      description: Missing, expired, malformed or revoked access token.
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorEnvelope'
+    Forbidden:
+      description: The role or token scope does not permit this operation.
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorEnvelope'
+    FeatureDisabled:
+      description: The tenant has not enabled the required premium module.
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorEnvelope'
+    NotFound:
+      description: The record does not exist in the caller's tenant scope.
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorEnvelope'
+    TenantNotFound:
+      description: No tenant is configured for the requested Host.
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorEnvelope'
+    Conflict:
+      description: The state transition already happened.
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorEnvelope'
+    UnsupportedMediaType:
+      description: Request body is not application/json.
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorEnvelope'
+    TooManyRequests:
+      description: Rate limit exceeded.
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorEnvelope'
+
+  schemas:
+    ErrorEnvelope:
+      type: object
+      required: [success, error, code, requestId]
+      properties:
+        success:
+          type: boolean
+          const: false
+        error:
+          type: string
+          description: Client-safe message. Never contains a stack or SQL detail.
+        code:
+          type: string
+          enum:
+            - VALIDATION_ERROR
+            - UNAUTHORIZED
+            - FORBIDDEN
+            - TENANT_SCOPE_MISMATCH
+            - NOT_FOUND
+            - CONFLICT
+            - FEATURE_DISABLED
+            - UNSUPPORTED_MEDIA_TYPE
+            - PAYLOAD_TOO_LARGE
+            - RATE_LIMITED
+            - SERVICE_UNAVAILABLE
+            - INTERNAL_ERROR
+        requestId:
+          type: string
+      additionalProperties: false
+
+    SuccessMessage:
+      type: object
+      required: [success, message]
+      properties:
+        success:
+          type: boolean
+          const: true
+        message:
+          type: string
+
+    Health:
+      type: object
+      required: [success, status, uptimeSeconds]
+      properties:
+        success:
+          type: boolean
+          const: true
+        status:
+          type: string
+          const: ok
+        uptimeSeconds:
+          type: integer
+          minimum: 0
+
+    Readiness:
+      type: object
+      required: [success, checks]
+      properties:
+        success:
+          type: boolean
+        checks:
+          type: object
+          required: [database, redis]
+          properties:
+            database:
+              type: string
+              enum: [ok, down]
+            redis:
+              type: string
+              enum: [ok, down]
+
+    Role:
+      type: string
+      enum: [admin, field_staff, client]
+
+    ProjectStatus:
+      type: string
+      enum: [planning, active, completed]
+
+    ChangeOrderStatus:
+      type: string
+      enum: [pending, approved, rejected]
+
+    LoginRequest:
+      type: object
+      required: [email, password]
+      additionalProperties: false
+      properties:
+        email:
+          type: string
+          format: email
+          description: Matched case-insensitively inside the resolved tenant.
+        password:
+          type: string
+          minLength: 1
+          maxLength: 200
+
+    LoginUser:
+      type: object
+      required: [id, email, role]
+      properties:
+        id:
+          type: string
+          format: uuid
+        email:
+          type: string
+          format: email
+        role:
+          $ref: '#/components/schemas/Role'
+
+    LoginTenantBranding:
+      type: object
+      required: [companyName, primaryColor, secondaryColor]
+      properties:
+        companyName:
+          type: string
+        logoUrl:
+          type: [string, 'null']
+          format: uri
+        primaryColor:
+          type: string
+          pattern: '^#[0-9A-Fa-f]{6}$'
+        secondaryColor:
+          type: string
+          pattern: '^#[0-9A-Fa-f]{6}$'
+
+    LoginResponse:
+      type: object
+      required: [success, token, user, tenantBranding]
+      properties:
+        success:
+          type: boolean
+          const: true
+        token:
+          type: string
+          description: HS256 JWT.
+        user:
+          $ref: '#/components/schemas/LoginUser'
+        tenantBranding:
+          $ref: '#/components/schemas/LoginTenantBranding'
+
+    BrandingConfig:
+      type: object
+      required: [typography, layout, assets]
+      properties:
+        typography:
+          type: object
+          required: [font_family, base_size]
+          properties:
+            font_family:
+              type: string
+              minLength: 1
+              maxLength: 120
+            base_size:
+              type: string
+              pattern: '^(0|\d{1,2}px|\d(\.\d+)?rem)$'
+        layout:
+          type: object
+          required: [navbar_style, sidebar_position, border_radius]
+          properties:
+            navbar_style:
+              type: string
+              enum: [glassmorphism, solid, minimal]
+            sidebar_position:
+              type: string
+              enum: [left, right]
+            border_radius:
+              type: string
+              pattern: '^(0|\d{1,2}px|\d(\.\d+)?rem)$'
+        assets:
+          type: object
+          required: [favicon_url, email_banner_url]
+          properties:
+            favicon_url:
+              type: string
+              format: uri
+            email_banner_url:
+              type: string
+              format: uri
+
+    TenantFeatures:
+      type: object
+      required: [estimator, clientPortal, changeOrders]
+      properties:
+        estimator:
+          type: boolean
+        clientPortal:
+          type: boolean
+        changeOrders:
+          type: boolean
+
+    TenantBranding:
+      type: object
+      required: [companyName, subdomain, primaryColor, secondaryColor, brandingConfig, features]
+      properties:
+        companyName:
+          type: string
+        subdomain:
+          type: string
+        logoUrl:
+          type: [string, 'null']
+          format: uri
+        primaryColor:
+          type: string
+          pattern: '^#[0-9A-Fa-f]{6}$'
+        secondaryColor:
+          type: string
+          pattern: '^#[0-9A-Fa-f]{6}$'
+        brandingConfig:
+          $ref: '#/components/schemas/BrandingConfig'
+        features:
+          $ref: '#/components/schemas/TenantFeatures'
+
+    BrandingResponse:
+      type: object
+      required: [success, tenant]
+      properties:
+        success:
+          type: boolean
+          const: true
+        tenant:
+          $ref: '#/components/schemas/TenantBranding'
+
+    UpdateBrandingRequest:
+      type: object
+      additionalProperties: false
+      minProperties: 1
+      properties:
+        companyName:
+          type: string
+          minLength: 2
+          maxLength: 255
+        logoUrl:
+          type: string
+          description: Absolute URL, or empty string to clear the logo.
+        primaryColor:
+          type: string
+          pattern: '^#[0-9A-Fa-f]{6}$'
+        secondaryColor:
+          type: string
+          pattern: '^#[0-9A-Fa-f]{6}$'
+        brandingConfig:
+          type: object
+          description: Deep-merged with the stored configuration.
+          additionalProperties: false
+          properties:
+            typography:
+              type: object
+              additionalProperties: false
+              properties:
+                font_family:
+                  type: string
+                  minLength: 1
+                  maxLength: 120
+                base_size:
+                  type: string
+                  pattern: '^(0|\d{1,2}px|\d(\.\d+)?rem)$'
+            layout:
+              type: object
+              additionalProperties: false
+              properties:
+                navbar_style:
+                  type: string
+                  enum: [glassmorphism, solid, minimal]
+                sidebar_position:
+                  type: string
+                  enum: [left, right]
+                border_radius:
+                  type: string
+                  pattern: '^(0|\d{1,2}px|\d(\.\d+)?rem)$'
+            assets:
+              type: object
+              additionalProperties: false
+              properties:
+                favicon_url:
+                  type: string
+                email_banner_url:
+                  type: string
+
+    EstimateRequest:
+      type: object
+      required: [squareFootage, materialTier, projectType]
+      additionalProperties: false
+      properties:
+        squareFootage:
+          type: integer
+          minimum: 1
+          maximum: 1000000
+        materialTier:
+          type: string
+          minLength: 1
+          maxLength: 60
+          description: Key from the tenant's material multiplier matrix.
+        projectType:
+          type: string
+          minLength: 1
+          maxLength: 60
+          description: Key from the tenant's base rate matrix.
+
+    Calculation:
+      type: object
+      required: [baseRatePerSqFt, materialMultiplier, estimatedCostLow, estimatedCostHigh, currency]
+      properties:
+        baseRatePerSqFt:
+          type: number
+          minimum: 0
+        materialMultiplier:
+          type: number
+          minimum: 0
+        estimatedCostLow:
+          type: number
+          minimum: 0
+        estimatedCostHigh:
+          type: number
+          minimum: 0
+        currency:
+          type: string
+          const: USD
+
+    EstimateResponse:
+      type: object
+      required: [success, calculation]
+      properties:
+        success:
+          type: boolean
+          const: true
+        calculation:
+          $ref: '#/components/schemas/Calculation'
+
+    Project:
+      type: object
+      required:
+        - id
+        - clientId
+        - projectName
+        - status
+        - currentPhase
+        - progressPercentage
+        - estimatedCost
+        - updatedAt
+      properties:
+        id:
+          type: string
+          format: uuid
+        clientId:
+          type: [string, 'null']
+          format: uuid
+        projectName:
+          type: string
+        status:
+          $ref: '#/components/schemas/ProjectStatus'
+        currentPhase:
+          type: [string, 'null']
+        progressPercentage:
+          type: integer
+          minimum: 0
+          maximum: 100
+        estimatedCost:
+          type: number
+          minimum: 0
+        updatedAt:
+          type: string
+          format: date-time
+
+    CreateProjectRequest:
+      type: object
+      required: [projectName]
+      additionalProperties: false
+      properties:
+        projectName:
+          type: string
+          minLength: 2
+          maxLength: 255
+        clientId:
+          type: string
+          format: uuid
+          description: Must reference a client-role user of this tenant.
+        status:
+          $ref: '#/components/schemas/ProjectStatus'
+        currentPhase:
+          type: string
+          minLength: 1
+          maxLength: 100
+        progressPercentage:
+          type: integer
+          minimum: 0
+          maximum: 100
+        estimatedCost:
+          type: number
+          minimum: 0
+          maximum: 9999999999.99
+
+    UpdateProgressRequest:
+      type: object
+      required: [currentPhase, progressPercentage]
+      additionalProperties: false
+      properties:
+        currentPhase:
+          type: string
+          minLength: 1
+          maxLength: 100
+        progressPercentage:
+          type: integer
+          minimum: 0
+          maximum: 100
+
+    ProjectListResponse:
+      type: object
+      required: [success, projects]
+      properties:
+        success:
+          type: boolean
+          const: true
+        projects:
+          type: array
+          items:
+            $ref: '#/components/schemas/Project'
+
+    ProjectResponse:
+      type: object
+      required: [success, project]
+      properties:
+        success:
+          type: boolean
+          const: true
+        project:
+          $ref: '#/components/schemas/Project'
+
+    ProgressResponse:
+      type: object
+      required: [success, message, updatedProject]
+      properties:
+        success:
+          type: boolean
+          const: true
+        message:
+          type: string
+        updatedProject:
+          $ref: '#/components/schemas/Project'
+
+    ChangeOrder:
+      type: object
+      required:
+        - id
+        - projectId
+        - title
+        - description
+        - costImpact
+        - status
+        - signedBy
+        - signedAt
+        - ipAddress
+        - createdAt
+      properties:
+        id:
+          type: string
+          format: uuid
+        projectId:
+          type: string
+          format: uuid
+        title:
+          type: string
+        description:
+          type: [string, 'null']
+        costImpact:
+          type: number
+        status:
+          $ref: '#/components/schemas/ChangeOrderStatus'
+        signedBy:
+          type: [string, 'null']
+          format: uuid
+        signedAt:
+          type: [string, 'null']
+          format: date-time
+        ipAddress:
+          type: [string, 'null']
+        createdAt:
+          type: string
+          format: date-time
+
+    CreateChangeOrderRequest:
+      type: object
+      required: [projectId, title, costImpact]
+      additionalProperties: false
+      properties:
+        projectId:
+          type: string
+          format: uuid
+        title:
+          type: string
+          minLength: 3
+          maxLength: 255
+        description:
+          type: string
+          maxLength: 5000
+        costImpact:
+          type: number
+          minimum: 0
+          maximum: 9999999999.99
+
+    ChangeOrderListResponse:
+      type: object
+      required: [success, changeOrders]
+      properties:
+        success:
+          type: boolean
+          const: true
+        changeOrders:
+          type: array
+          items:
+            $ref: '#/components/schemas/ChangeOrder'
+
+    ChangeOrderResponse:
+      type: object
+      required: [success, changeOrder]
+      properties:
+        success:
+          type: boolean
+          const: true
+        changeOrder:
+          $ref: '#/components/schemas/ChangeOrder'
+
+    ApprovalAuditTrail:
+      type: object
+      required: [changeOrderId, status, signedBy, signedAt, ipAddress]
+      properties:
+        changeOrderId:
+          type: string
+          format: uuid
+        status:
+          type: string
+          const: approved
+        signedBy:
+          type: string
+          format: uuid
+        signedAt:
+          type: string
+          format: date-time
+        ipAddress:
+          type: [string, 'null']
+          description: Normalised client address at signing time.
+
+    ApproveResponse:
+      type: object
+      required: [success, message, auditTrail]
+      properties:
+        success:
+          type: boolean
+          const: true
+        message:
+          type: string
+        auditTrail:
+          $ref: '#/components/schemas/ApprovalAuditTrail'

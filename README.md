@@ -1,5 +1,7 @@
 # ConstructOps Engine
 
+[![CI](https://github.com/raHULK777/ConstructOps/actions/workflows/ci.yml/badge.svg)](https://github.com/raHULK777/ConstructOps/actions/workflows/ci.yml)
+
 Multi-tenant, white-label operations API for mid-sized construction contractors.
 One deployment serves many branded workspaces, each resolved from its own domain.
 
@@ -12,11 +14,15 @@ One deployment serves many branded workspaces, each resolved from its own domain
 | Check | Command | Status |
 |---|---|---|
 | Strict typecheck (src, scripts, tests) | `npm run typecheck` | passing |
-| Behaviour suite — 94 tests | `npm test` | passing |
+| Behaviour suite — 100 tests | `npm test` | passing |
+| OpenAPI contract ↔ mounted-route parity | `npm test` | passing |
 | Production build | `npm run build` | passing |
 | Live HTTP smoke over a real socket | `npm run smoke` | passing |
 | Migration DDL executed verbatim | via `tests/support/testDb.ts` | passing (pg-mem) |
 | Fail-fast on invalid environment | `node dist/server.js` without env | exits 1 with field names |
+
+CI runs the same gates on Node 20 and Node 24 for every push and pull request
+(`.github/workflows/ci.yml`).
 
 **Not yet exercised in this workspace:** a real PostgreSQL cluster, a real Redis
 instance, and the migration runner's advisory-lock path. Docker and `psql` are
@@ -33,7 +39,7 @@ npm run dev
 The automated suite substitutes PostgreSQL with `pg-mem` — which executes the
 **real** `migrations/001_tables.sql` and `002_indexes.sql`, including foreign
 keys, cascades, checks and unique constraints — and Redis with an in-memory
-double that can be forced to fail. All 94 tests drive the real Express pipeline,
+double that can be forced to fail. All 100 tests drive the real Express pipeline,
 real middleware and real SQL.
 
 ---
@@ -111,7 +117,9 @@ src/
   utils/                       asyncHandler, errors, jwt, password, host, uuid
 migrations/                    000 extensions · 001 tables · 002 indexes
 scripts/                       migrate, seed, onboard, smoke
-tests/                         support harness + unit + integration suites
+docs/openapi.yaml              OpenAPI 3.1 contract
+tests/                         support harness + unit + integration + contract
+.github/workflows/ci.yml       typecheck, test, build, smoke (Node 20 & 24)
 ```
 
 ---
@@ -186,6 +194,11 @@ Change-order approval is deliberately narrow: `client` only, ownership proven by
 a join against `projects.client_id`, and the `UPDATE` only succeeds while
 `status = 'pending'` — so a double click returns `409`, never two signatures.
 
+The machine-readable contract is [`docs/openapi.yaml`](docs/openapi.yaml)
+(OpenAPI 3.1). It is not decorative: `tests/contract/openapi.test.ts` fails if a
+documented operation is not mounted, if an operation lacks an id/summary/tags or
+a 2xx response, or if a protected route forgets to declare bearer security.
+
 ---
 
 ## White-labeling
@@ -253,6 +266,5 @@ token or body — flipping a paid module is a data change, not a deploy.
 - Refresh tokens, logout/revocation lists and password reset are not built.
 - Transactional email, CSV exports and the operator (platform-superadmin) console
   are out of scope for v1 per `SRS.txt`.
-- No OpenAPI document yet; the route table above is the contract of record.
 - Real PostgreSQL/Redis integration should be run once via `docker compose`
   before production rollout.

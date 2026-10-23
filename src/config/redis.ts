@@ -17,11 +17,14 @@ export interface RedisLike {
 export function createRedis(env: Env, logger: Logger): Redis {
   const client = new Redis(env.redisUrl, {
     connectionName: 'constructops-engine',
-    connectTimeout: 5_000,
-    maxRetriesPerRequest: 2,
+    connectTimeout: 2_000,
+    maxRetriesPerRequest: 1,
+    // Never queue commands while disconnected: a down cache must cost a few
+    // milliseconds (then fall back to PostgreSQL), not the socket timeout.
+    enableOfflineQueue: false,
     enableReadyCheck: true,
     retryStrategy(times: number): number {
-      return Math.min(times * 200, 2_000);
+      return Math.min(times * 250, 2_000);
     },
   });
 

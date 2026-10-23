@@ -45,6 +45,15 @@ function parseCachedTenant(raw: string): TenantRecord | null {
  * unknown-host probes cannot be used to amplify database load.
  */
 export function tenantResolver(deps: AppDependencies): RequestHandler {
+  // Circuit breaker: after a cache failure, skip Redis for a short window so a
+  // down cache cannot add latency (or log noise) to every request.
+  let cachePausedUntil = 0;
+
+  const cacheAvailable = (): boolean => Date.now() >= cachePausedUntil;
+  const pauseCache = (): void => {
+    cachePausedUntil = Date.now() + 10_000;
+  };
+
   return asyncHandler(async (req, _res, next) => {
     const host = normalizeHost(req.headers.host);
     if (!host) throw notFound('Tenant domain context not found.');
@@ -52,12 +61,15 @@ export function tenantResolver(deps: AppDependencies): RequestHandler {
     const cacheKey = tenantCacheKey(host);
 
     let cached: string | null = null;
-    try {
-      cached = await deps.redis.get(cacheKey);
-    } catch (error) {
-      deps.logger.warn('Tenant cache read failed; falling back to PostgreSQL', {
-        error: (error as Error).message,
-      });
+    if (cacheAvailable()) {
+      try {
+        cached = await deps.redis.get(cacheKey);
+      } catch (error) {
+        pauseCache();
+        deps.logger.warn('Tenant cache read failed; falling back to PostgreSQL', {
+          error: (error as Error).message,
+        });
+      }
     }
 
     if (cached === MISSING_SENTINEL) {
@@ -79,10 +91,15 @@ export function tenantResolver(deps: AppDependencies): RequestHandler {
     const row = await findTenantByHost(deps.db, { host, subdomain });
 
     if (!row) {
-      try {
-        await deps.redis.setex(cacheKey, MISSING_TTL_SECONDS, MISSING_SENTINEL);
-      } catch {
-        // Cache is optional; the 404 stands regardless.
+      if (cacheAvailable()) {
+        try {
+          await deps.redis.setex(cacheKey, MISSING_TTL_SECONDS, MISSING_SENTINEL);
+        } catch (error) {
+          pauseCache();
+          deps.logger.warn('Tenant cache write failed; serving without cache', {
+            error: (error as Error).message,
+          });
+        }
       }
       throw notFound('Tenant domain context not found.');
     }
@@ -90,16 +107,19 @@ export function tenantResolver(deps: AppDependencies): RequestHandler {
     const tenant = mapTenantRow(row);
     req.tenant = tenant;
 
-    try {
-      await deps.redis.setex(
-        cacheKey,
-        deps.env.tenantCacheTtlSeconds,
-        JSON.stringify(tenant),
-      );
-    } catch (error) {
-      deps.logger.warn('Tenant cache write failed; serving without cache', {
-        error: (error as Error).message,
-      });
+    if (cacheAvailable()) {
+      try {
+        await deps.redis.setex(
+          cacheKey,
+          deps.env.tenantCacheTtlSeconds,
+          JSON.stringify(tenant),
+        );
+      } catch (error) {
+        pauseCache();
+        deps.logger.warn('Tenant cache write failed; serving without cache', {
+          error: (error as Error).message,
+        });
+      }
     }
 
     next();

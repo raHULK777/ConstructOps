@@ -21,6 +21,7 @@
     "seed": "tsx scripts/seed.ts",
     "onboard": "tsx scripts/onboard.ts",
     "smoke": "tsx scripts/smoke.ts",
+    "smoke:live": "tsx scripts/smoke-live.ts",
     "dev:memory": "tsx scripts/dev-inmemory-api.ts",
     "portal:dev": "npm run dev -w @constructops/portal",
     "portal:build": "npm run build -w @constructops/portal",

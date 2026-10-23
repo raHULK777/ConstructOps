@@ -118,6 +118,26 @@ describe('tenant resolution', () => {
     expect(response.body.tenant.subdomain).toBe('alpha');
   });
 
+  it('stops calling Redis briefly after a cache failure (circuit breaker)', async () => {
+    await insertTenant(ctx.db, { subdomain: 'alpha' });
+
+    ctx.redis.failReads = true;
+    const first = await request(ctx.app)
+      .get('/api/v1/tenant/branding')
+      .set('Host', HOSTS.alpha);
+    expect(first.status).toBe(200);
+
+    const attemptsAfterFailure = ctx.redis.gets;
+    const second = await request(ctx.app)
+      .get('/api/v1/tenant/branding')
+      .set('Host', HOSTS.alpha);
+
+    expect(second.status).toBe(200);
+    // The breaker skips Redis for a short window instead of paying the failure
+    // cost on every request.
+    expect(ctx.redis.gets).toBe(attemptsAfterFailure);
+  });
+
   it('discards a corrupt cache entry and re-resolves from the database', async () => {
     await insertTenant(ctx.db, { subdomain: 'alpha' });
     await ctx.redis.setex(tenantCacheKey(HOSTS.alpha), 60, '{"unexpected":true}');

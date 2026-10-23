@@ -15,34 +15,31 @@ its own domain.
 | Check | Command | Status |
 |---|---|---|
 | Strict typecheck (src, scripts, tests) | `npm run typecheck` | passing |
-| Behaviour suite — 100 tests | `npm test` | passing |
+| Behaviour suite — 101 tests | `npm test` | passing |
 | OpenAPI contract ↔ mounted-route parity | `npm test` | passing |
 | Production build | `npm run build` | passing |
 | Live HTTP smoke over a real socket | `npm run smoke` | passing |
 | Portal production build (Next.js 16) | `npm run portal:build` | passing |
 | Portal end-to-end over HTTP (login, dashboard, approval, re-theme) | in-memory API + portal build | passing |
 | Migration DDL executed verbatim | via `tests/support/testDb.ts` | passing (pg-mem) |
+| Real PostgreSQL 16: migrate, re-migrate, seed, onboarding, audit trail | portable cluster, `smoke:live` | passing |
+| Real PostgreSQL 16 + Redis 7 (CI `integration` job) | `npm run migrate && npm run seed && npm run smoke:live` | passing in CI |
 | Fail-fast on invalid environment | `node dist/server.js` without env | exits 1 with field names |
 
-CI runs the same gates on Node 20 and Node 24 for every push and pull request
-(`.github/workflows/ci.yml`).
+CI runs the fast suite on Node 20 and Node 24, and a separate `integration` job
+boots PostgreSQL 16 + Redis 7 services, migrates, seeds, starts the built API and
+runs `scripts/smoke-live.ts` against it.
 
-**Not yet exercised in this workspace:** a real PostgreSQL cluster, a real Redis
-instance, and the migration runner's advisory-lock path. Docker and `psql` are
-not installed here. `docker-compose.yml` is provided so those paths can be
-verified on a machine that has Docker:
-
-```bash
-docker compose up -d
-cp .env.example .env          # fill in JWT_SECRET
-npm run migrate && npm run seed
-npm run dev
-```
+**Local limitation:** this machine has no Docker, WSL, or `psql`. The PostgreSQL
+pass above was executed with a portable PostgreSQL 16.4 cluster in `%TEMP%`
+(no installer, no service, removed afterwards). Real Redis needs Docker or the CI
+run; locally the API was verified with Redis absent, including the documented
+`503` readiness degradation and a full `smoke:live` pass in ~1 s.
 
 The automated suite substitutes PostgreSQL with `pg-mem` — which executes the
 **real** `migrations/001_tables.sql` and `002_indexes.sql`, including foreign
 keys, cascades, checks and unique constraints — and Redis with an in-memory
-double that can be forced to fail. All 100 tests drive the real Express pipeline,
+double that can be forced to fail. All 101 tests drive the real Express pipeline,
 real middleware and real SQL.
 
 ---
@@ -288,8 +285,13 @@ recorded audit trail, rejection of a second signature, and a live re-theme after
 
 - **Migrations** are checksummed; editing an applied file aborts the run. A
   PostgreSQL advisory lock prevents concurrent deploys from racing.
-- **Redis is optional at runtime.** A read or write failure logs a warning and
-  falls back to PostgreSQL; `/readyz` still reports `redis: down` for alerting.
+- **Redis is optional at runtime.** The client uses `enableOfflineQueue: false`
+  and `maxRetriesPerRequest: 1`, so a down cache fails in milliseconds instead of
+  stalling on the socket timeout. `tenantResolver` also pauses cache access for
+  10 s after a failure (a small circuit breaker), so one outage costs one warning
+  rather than one per request. `/readyz` still reports `redis: down` for alerting.
+  This behaviour was found and fixed during the real-PostgreSQL pass — the fake
+  Redis double failed instantly and had hidden the latency.
 - **PostgreSQL is mandatory**; boot exits 1 if it cannot be reached.
 - **Graceful shutdown** on SIGINT/SIGTERM: stop accepting, drain, close pool,
   quit Redis, force-exit after 10 s.

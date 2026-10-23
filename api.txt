@@ -1,0 +1,157 @@
+
+📑 API Route Matrix & Contract Specifications
+
+Project Name: ConstructOps Engine
+Version: 1.0.0 (MVP Implementation Specification)
+Author/Context Builder: Lead Architect
+
+1. Global API Rules for the AI Agent
+
+The AI agent must build all endpoints following these architectural interface rules:
+1. Base Path Standard: All service routes must mount under the /api/v1 entry path prefix.
+2. Standard Payload Wrapper: Every API response must return a consistent JSON structure containing a success boolean wrapper flag.
+3. MIME Processing Matrix: All incoming request payloads must be parsed as application/json. Multi-part form streaming is rejected in this phase.
+
+2. API Contract Matrices
+
+
+🔑 Authentication Module
+
+
+POST /api/v1/auth/login
+
+• Access Level: Public (Resolved via tenant domain context header)
+• Request Header Expectation: Host: alpha-builders.constructops.io
+• Request Body Payload Contract:
+json
+{
+  "email": "pm@alphabuilders.com",
+  "password": "HighEntropySecurePassword123!"
+}
+Use code with caution.
+• Success Response Contract (200 OK):
+json
+{
+  "success": true,
+  "token": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...",
+  "user": {
+    "id": "7b2d56a2-fa48-4c6e-82d2-8802dcdbe144",
+    "email": "pm@alphabuilders.com",
+    "role": "admin"
+  },
+  "tenantBranding": {
+    "companyName": "Alpha Builders Pro",
+    "logoUrl": "https://constructops.io",
+    "primaryColor": "#0F172A",
+    "secondaryColor": "#3B82F6"
+  }
+}
+Use code with caution.
+
+🧮 Public Tools Module
+
+
+POST /api/v1/tools/estimate
+
+• Access Level: Public (Feature-Gated: Requires enable_estimator = true)
+• Request Body Payload Contract:
+json
+{
+  "squareFootage": 2450,
+  "materialTier": "premium",
+  "projectType": "residential_remodel"
+}
+Use code with caution.
+• Success Response Contract (200 OK):
+json
+{
+  "success": true,
+  "calculation": {
+    "baseRatePerSqFt": 150.00,
+    "materialMultiplier": 1.25,
+    "estimatedCostLow": 459375.00,
+    "estimatedCostHigh": 505312.50,
+    "currency": "USD"
+  }
+}
+Use code with caution.
+
+🏗️ Operations Module (Projects)
+
+
+GET /api/v1/projects
+
+• Access Level: Private (admin, field_staff, client)
+• Request Headers Requirement: Authorization: Bearer <token>
+• Success Response Contract (200 OK):
+	• Note: If role is client, the array filters automatically to only show items where client_id == req.user.id.
+json
+{
+  "success": true,
+  "projects": [
+    {
+      "id": "e2a14b38-d63f-4e08-9df8-011883726712",
+      "projectName": "Downtown Commercial Retrofit Phase 2",
+      "status": "active",
+      "currentPhase": "Electrical",
+      "progressPercentage": 45,
+      "estimatedCost": 750000.00
+    }
+  ]
+}
+Use code with caution.
+
+PUT /api/v1/projects/:id/progress
+
+• Access Level: Private (admin, field_staff)
+• Request Body Payload Contract:
+json
+{
+  "currentPhase": "Drywall & Inspection",
+  "progressPercentage": 60
+}
+Use code with caution.
+• Success Response Contract (200 OK):
+json
+{
+  "success": true,
+  "message": "Project progress updated successfully.",
+  "updatedProject": {
+    "id": "e2a14b38-d63f-4e08-9df8-011883726712",
+    "currentPhase": "Drywall & Inspection",
+    "progressPercentage": 60
+  }
+}
+Use code with caution.
+
+📝 Operations Module (Change Orders)
+
+
+PUT /api/v1/change-orders/:id/approve
+
+• Access Level: Private (Strictly Restricted to client role matches)
+• Feature-Gated: Requires enable_change_orders = true
+• Success Response Contract (200 OK):
+json
+{
+  "success": true,
+  "message": "Change order execution loop closed successfully.",
+  "auditTrail": {
+    "changeOrderId": "11bc7da2-990a-42fb-be1d-88b17c189ef9",
+    "status": "approved",
+    "signedBy": "3c1a8bf9-2e11-477d-bbcc-009e48dfd221",
+    "signedAt": "2026-10-23T14:34:00.000Z",
+    "ipAddress": "192.168.1.45"
+  }
+}
+Use code with caution.
+
+❌ Global Standard Error Matrix
+
+The AI agent must intercept all execution thread failure vectors and map them to this predictable JSON output structure:
+
+Scenario	HTTP Status Code	Response Payload Structure
+Invalid Auth Token Scope	401 Unauthorized	{"success": false, "error": "Access token missing or expired."}
+Cross-Tenant Injection Mismatch	403 Forbidden	{"success": false, "error": "Access token scope does not match current tenant domain context."}
+Resource Missing / Wrong ID	404 Not Found	{"success": false, "error": "Requested record resource not found."}
+Zod Input Struct Failures	400 Bad Request	{"success": false, "error": "Validation failed: squareFootage must be a positive integer."}

@@ -1,0 +1,239 @@
+
+🎨 ConstructOps Dynamic Rebranding Engine: Engineering & Implementation Specification
+
+This document provides the complete engineering specification for the dynamic, runtime-driven runtime rebranding (white-labeling) mechanism for the platform. This framework allows a single deployment instance of a Next.js (React) frontend and a Node.js backend to morph into a highly customized client interface, depending on the active context.
+
+🏛️ Strategy Overview
+
+The platform switches layout templates, typography scales, primary/secondary colors, and logo assets instantly without requiring code compilation or server restarts.
+It manages user presentation context through a two-stage fallback lifecycle:
+[ Incoming Request ]
+          |
+          v
++-------------------------------------------------------------+
+
+| STAGE 1: DNS / Hostname Context Resolving                   |
+| (Before Authentication / Public Landing Pages & Estimators)|
++-------------------------------------------------------------+
+          |
+          v
++-------------------------------------------------------------+
+
+| STAGE 2: Secure JWT Session Token Context Override         |
+| (Post Authentication / Inside Client/Staff Dashboards)      |
++-------------------------------------------------------------+
+
+💾 1. Database Schema Extensions
+
+To store layout configurations efficiently, extend your PostgreSQL tenants schema with an asset tracking matrix.
+sql
+ALTER TABLE tenants ADD COLUMN branding_config JSONB DEFAULT '{
+  "typography": {
+    "font_family": "Geist Sans",
+    "base_size": "16px"
+  },
+  "layout": {
+    "navbar_style": "glassmorphism",
+    "sidebar_position": "left",
+    "border_radius": "0.375rem"
+  },
+  "assets": {
+    "favicon_url": "https://constructops.io",
+    "email_banner_url": "https://constructops.io"
+  }
+}'::jsonb;
+Use code with caution.
+
+⚙️ 2. CSS Architecture: Dynamic Tailwind Injection
+
+Instead of compiling individual stylesheet variations, map Tailwind utility modifiers to CSS Custom Properties (Variables) compiled inside the :root pseudo-class during engine runtime rendering loops.
+
+Frontend Configurations (tailwind.config.js)
+
+javascript
+/** @type {import('tailwindcss').Config} */
+module.exports = {
+  content: [
+    "./app/**/*.{js,ts,jsx,tsx}",
+    "./components/**/*.{js,ts,jsx,tsx}",
+  ],
+  theme: {
+    extend: {
+      colors: {
+        // Mapped to runtime custom CSS global properties
+        brandPrimary: 'var(--primary-color)',
+        brandSecondary: 'var(--secondary-color)',
+        brandBackground: 'var(--brand-bg)',
+        brandSurface: 'var(--brand-surface)',
+      },
+      borderRadius: {
+        brand: 'var(--brand-radius)',
+      },
+      fontFamily: {
+        brand: ['var(--brand-font)', 'sans-serif'],
+      }
+    },
+  },
+  plugins: [],
+}
+Use code with caution.
+
+📑 3. Next.js Runtime Hydration Wrapper
+
+Implement the theme injection pattern in your root application shell. It reads structural configuration metadata tokens directly from server properties and injects them as an inline raw HTML document execution block.
+tsx
+// app/layout.tsx
+import { headers } from 'next/headers';
+import './globals.css';
+
+async function getTenantContext(host: string) {
+  // Query your internal Node.js runtime resolution layer proxy API
+  const res = await fetch(`https://constructops.internal{host}`, {
+    next: { revalidate: 3600 } // Cache configurations for 1 hour
+  });
+  if (!res.ok) return null;
+  return res.json();
+}
+
+export default async function RootLayout({ children }: { children: React.ReactNode }) {
+  const headersList = await headers();
+  const host = headersList.get('host') || 'default.constructops.io';
+  const tenant = await getTenantContext(host);
+
+  // Set structural asset layout defaults if tenant resolution fails
+  const primaryColor = tenant?.primary_color || '#0F172A';
+  const secondaryColor = tenant?.secondary_color || '#3B82F6';
+  const brandRadius = tenant?.branding_config?.layout?.border_radius || '0.375rem';
+  const fontFamily = tenant?.branding_config?.typography?.font_family || 'Inter';
+
+  return (
+    <html 
+      lang="en"
+      style={{
+        '--primary-color': primaryColor,
+        '--secondary-color': secondaryColor,
+        '--brand-radius': brandRadius,
+        '--brand-font': fontFamily,
+      } as React.CSSProperties}
+    >
+      <head>
+        <link rel="icon" href={tenant?.branding_config?.assets?.favicon_url || '/favicon.ico'} />
+      </head>
+      <body className="font-brand bg-slate-50 text-slate-900 antialiased">
+        {children}
+      </body>
+    </html>
+  );
+}
+Use code with caution.
+
+🔒 4. Edge-Case Protection: Domain-Mismatch Pipeline
+
+A common issue in multi-tenant software platforms happens when a client or sub-contractor signs into their system from an incorrect workspace gateway address (e.g., trying to access Contractor B's assets while sitting at contractor-a.constructops.io/login).
+Your platform must handle these states gracefully without breaking security boundaries.
+                  [ User submits Login Credentials ]
+                                  |
+                                  v
+              [ Backend verifies Password & Token Metadata ]
+                                  |
+                                  v
+            / Does User tenant_id == Request Host tenant_id? \
+           <                                                  >
+            \_______________________ ________________________/
+                                    |
+                    YES             |            NO
+                     v              |             v
+        [ Grant access natively ]   |   [ Mismatch Interceptor Triggered ]
+
+                                    |             |
+                                    |             v
+                                    |   [ Inject Context Override State ]
+                                    |   [ Display Workspace Alert Banner ]
+
+The Middleware Solution
+
+Handle this validation within your frontend's layout controller route checks:
+tsx
+// components/WorkspaceGuard.tsx
+'use client';
+import { useEffect, useState } from 'react';
+import { useAuth } from '../hooks/useAuth'; // Custom state hooks
+import { useTenant } from '../context/TenantContext';
+
+export function WorkspaceGuard({ children }: { children: React.ReactNode }) {
+  const { user, sessionToken } = useAuth();
+  const activeTenantContext = useTenant();
+  const [mismatchDetected, setMismatchDetected] = useState(false);
+
+  useEffect(() => {
+    if (sessionToken && user && activeTenantContext) {
+      // If the user authenticated session profile belongs to a different client profile ID
+      if (user.tenant_id !== activeTenantContext.id) {
+        setMismatchDetected(true);
+        
+        // Dynamically correct visual tokens to match the user's home profile workspace
+        const root = document.documentElement;
+        root.style.setProperty('--primary-color', user.home_tenant_branding.primaryColor);
+        root.style.setProperty('--secondary-color', user.home_tenant_branding.secondaryColor);
+      }
+    }
+  }, [user, sessionToken, activeTenantContext]);
+
+  return (
+    <>
+      {mismatchDetected && (
+        <div className="bg-amber-600 text-white px-4 py-2 text-sm flex items-center justify-between font-medium animate-pulse z-50 relative">
+          <span>
+            ⚠️ Context Alert: You are viewing records for <strong>{user.home_tenant_branding.companyName}</strong> while accessing the gateway of <strong>{activeTenantContext.companyName}</strong>.
+          </span>
+          <a 
+            href={`https://${user.home_tenant_branding.subdomain}.constructops.io/dashboard`}
+            className="bg-white text-amber-900 px-3 py-1 rounded text-xs font-semibold hover:bg-amber-50 transition"
+          >
+            Go to My Workspace
+          </a>
+        </div>
+      )}
+      {children}
+    </>
+  );
+}
+Use code with caution.
+
+🏗️ 5. Clean, Scannable Rebranded UI Architecture Examples
+
+Because the values are handled globally inside Tailwind's core tokens, building standard components remains clean and straightforward.
+
+Rebranded Interactive Sidebar Component
+
+tsx
+// components/Sidebar.tsx
+export default function Sidebar() {
+  return (
+    <aside className="w-64 h-screen bg-slate-900 text-slate-400 flex flex-col justify-between border-r border-slate-800">
+      <div className="p-6">
+        <div className="flex items-center gap-3 mb-8">
+          <div className="h-8 w-8 rounded-brand bg-brandSecondary flex items-center justify-center text-slate-900 font-bold">
+            C
+          </div>
+          <span className="text-white font-semibold tracking-tight">Console Engine</span>
+        </div>
+        
+        <nav className="space-y-1">
+          <a href="#" className="flex items-center gap-3 px-4 py-2.5 rounded-brand bg-brandPrimary text-white font-medium transition">
+            Active Construction Projects
+          </a>
+          <a href="#" className="flex items-center gap-3 px-4 py-2.5 rounded-brand hover:bg-slate-800 hover:text-white transition">
+            Change Orders Dashboard
+          </a>
+        </nav>
+      </div>
+      
+      <div className="p-4 border-t border-slate-800">
+        <button className="w-full bg-brandSecondary text-slate-900 py-2 rounded-brand font-semibold hover:opacity-95 transition">
+          Quick Action Build
+        </button>
+      </div>
+    </aside>
+  );
+}

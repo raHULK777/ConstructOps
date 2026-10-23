@@ -1,0 +1,84 @@
+🏗️ Architectural Design & Tech Stack Manifesto
+
+Project Name: ConstructOps Engine
+Version: 1.0.0 (MVP Implementation Specification)
+Author/Context Builder: Lead Architect
+
+1. Directory Structure Blueprint
+
+The AI agent must scaffolding the platform using this strict Controller-Service-Repository pattern. Do not allow code or database logic to bleed into single file definitions.
+constructops-core/
+├── src/
+│   ├── config/             # DB Pool, Redis, and Global System Environment Maps
+│   │   ├── database.ts
+│   │   └── redis.ts
+│   ├── middleware/         # Security Gatekeepers, Content Injections, and Parsers
+│   │   ├── tenantResolver.ts
+│   │   ├── authenticate.ts
+│   │   └── featureGate.ts
+│   ├── modules/            # Domain Driven Isolated Feature Modularity
+│   │   ├── tenant/
+│   │   ├── auth/
+│   │   ├── project/
+│   │   └── changeOrder/    # Houses routes, controllers, services, and repositories per module
+│   │       ├── changeOrder.routes.ts
+│   │       ├── changeOrder.controller.ts
+│   │       ├── changeOrder.service.ts
+│   │       └── changeOrder.repository.ts
+│   └── app.ts              # System Bootstrapper and Request Pipeline Configuration
+├── package.json
+└── tsconfig.json
+
+2. Global State & Context Strategy
+
+The platform behaves as a completely stateless API service cluster. The execution lifespan of every incoming request relies entirely on a sequential, lifecycle hydration process:
+1. DNS Context Extraction: The platform pulls the current host string via req.headers.host.
+2. Fast-Cache Memory Hydration: The backend checks Redis for the configuration details matching that host.
+3. Database Fallback: If the cache misses, the backend reads the tenants table from PostgreSQL and saves the result to Redis.
+4. Context Injection: The matching configuration object is attached to req.tenant for all remaining routing loops.
+
+3. Asynchronous Error Handling Pipeline
+
+The AI agent must never use standard try-catch blocks inside individual routing controllers. To prevent memory leaks and unhandled promise rejections, all asynchronous controllers must be wrapped in a global exception execution utility.
+
+The Required Controller Wrapper
+
+typescript
+// utils/asyncHandler.ts
+import { Request, Response, NextFunction } from 'express';
+
+export const asyncHandler = (fn: Function) => (req: Request, res: Response, next: NextFunction) => {
+    Promise.resolve(fn(req, res, next)).catch(next);
+};
+Use code with caution.
+
+The Global Express Exception Handler
+
+typescript
+// middleware/errorHandler.ts
+import { Request, Response, NextFunction } from 'express';
+
+export function globalErrorHandler(err: any, req: Request, res: Response, next: NextFunction) {
+    console.error(`[SYSTEM CRITICAL ERROR]: ${err.message}`, err.stack);
+    
+    const statusCode = err.statusCode || 500;
+    return res.status(statusCode).json({
+        success: false,
+        error: err.message || 'Internal Server Infrastructure Exception Triggered.',
+        timestamp: new Date().toISOString()
+    });
+}
+Use code with caution.
+
+4. Environment & Variable Mapping Matrix
+
+The backend runtime cluster must strictly use this environmental validation map. If any parameter is missing during system initialization, the system execution must abort immediately.
+env
+# SERVER INFRASTRUCTURE CORE
+NODE_ENV=production
+PORT=8080
+JWT_SECRET=your_high_entropy_alphanumeric_hmac_secret_key_64_chars
+
+# STORAGE INFRASTRUCTURE CORE
+DATABASE_URL=postgresql://user:secure_password@host:5432/constructops?sslmode=require
+REDIS_URL=redis://default:secure_redis_password@host:6379

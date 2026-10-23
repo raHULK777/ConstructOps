@@ -1,0 +1,140 @@
+
+💾 Definitive Database Schema Mapping
+
+Project Name: ConstructOps Engine
+Version: 1.0.0 (MVP Implementation Specification)
+Author/Context Builder: Lead Architect
+
+1. Relational Integrity Rules for the AI Agent
+
+The AI agent must build, reference, and query the PostgreSQL database following these absolute rules:
+1. Forced Referential Isolation: Every table containing operational business data must include a tenant_id UUID column that explicitly references the tenants(id) table.
+2. Cascade Actions: All foreign keys pointing to tenants(id) must append ON DELETE CASCADE. If a contractor account is terminated, all related platform data must be automatically purged by the database engine.
+3. Snake_Case Convention: All table names, column names, constraints, and indexes must use lower snake_case. Do not use camelCase or PascalCase.
+4. UUID Primary Keys: All record IDs must use randomly generated UUIDv4 keys to prevent sequential ID guessing across tenant domains.
+
+2. Table-by-Table Data Definitions (DDL)
+
+The AI agent must use this exact structure when generating migrations, object relational maps (ORMs), or direct raw SQL queries.
+sql
+-- ENABLE CRYPTOGRAPHIC EXTENSION FOR UUID GENERATION
+CREATE EXTENSION IF NOT EXISTS "uuid-ossp";
+
+-- =========================================================================
+-- 1. MASTER TENANTS TABLE
+-- Stores administrative parameters, active software components, and theme metadata.
+-- =========================================================================
+CREATE TABLE tenants (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    company_name VARCHAR(255) NOT NULL,
+    subdomain VARCHAR(100) UNIQUE NOT NULL, 
+    custom_domain VARCHAR(255) UNIQUE,     
+    logo_url TEXT,
+    primary_color VARCHAR(7) DEFAULT '#0F172A',
+    secondary_color VARCHAR(7) DEFAULT '#3B82F6',
+    
+    -- Feature Module Flags (Boolean Toggle Switches)
+    enable_estimator BOOLEAN DEFAULT TRUE,
+    enable_client_portal BOOLEAN DEFAULT TRUE,
+    enable_change_orders BOOLEAN DEFAULT FALSE,
+    
+    -- Estimator Engine Configuration (Flexible multi-dimensional JSON pricing matrix)
+    estimator_pricing_matrix JSONB DEFAULT '{}'::jsonb, 
+    
+    -- Deep Structural Rebranding Config Tokens
+    branding_config JSONB DEFAULT '{
+      "typography": {
+        "font_family": "Geist Sans",
+        "base_size": "16px"
+      },
+      "layout": {
+        "navbar_style": "glassmorphism",
+        "sidebar_position": "left",
+        "border_radius": "0.375rem"
+      },
+      "assets": {
+        "favicon_url": "https://constructops.io",
+        "email_banner_url": "https://constructops.io"
+      }
+    }'::jsonb,
+    
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
+);
+
+-- =========================================================================
+-- 2. UNIFIED USERS TABLE
+-- Handles authentication credentials and role assignments for all platform entities.
+-- =========================================================================
+CREATE TABLE users (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    tenant_id UUID NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
+    email VARCHAR(255) NOT NULL,
+    password_hash TEXT NOT NULL,
+    role VARCHAR(50) NOT NULL CHECK (role IN ('admin', 'field_staff', 'client')), 
+    first_name VARCHAR(100),
+    last_name VARCHAR(100),
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+    
+    -- Structural Isolation Rule: Email namespaces are unique per specific tenant instance
+    UNIQUE(tenant_id, email)
+);
+
+-- =========================================================================
+-- 3. PROJECTS TABLE
+-- Tracks ongoing construction builds, operational phases, and budget health.
+-- =========================================================================
+CREATE TABLE projects (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    tenant_id UUID NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
+    client_id UUID REFERENCES users(id) ON DELETE SET NULL,
+    project_name VARCHAR(255) NOT NULL,
+    status VARCHAR(50) DEFAULT 'planning' CHECK (status IN ('planning', 'active', 'completed')),
+    current_phase VARCHAR(100) DEFAULT 'Permitting',
+    progress_percentage INT DEFAULT 0 CHECK (progress_percentage BETWEEN 0 AND 100),
+    estimated_cost NUMERIC(12, 2) NOT NULL DEFAULT 0.00,
+    updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
+);
+
+-- =========================================================================
+-- 4. CHANGE ORDERS TABLE
+-- High-scrutiny database ledger tracking legal project and cost updates.
+-- =========================================================================
+CREATE TABLE change_orders (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    tenant_id UUID NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
+    project_id UUID NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+    title VARCHAR(255) NOT NULL,
+    description TEXT,
+    cost_impact NUMERIC(12, 2) NOT NULL DEFAULT 0.00,
+    status VARCHAR(50) DEFAULT 'pending' CHECK (status IN ('pending', 'approved', 'rejected')),
+    signed_by UUID REFERENCES users(id) ON DELETE RESTRICT,
+    signed_at TIMESTAMP WITH TIME ZONE,
+    ip_address VARCHAR(45), -- Supports both IPv4 and IPv6 string standard configurations
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
+);
+Use code with caution.
+
+3. High-Performance Indexing Matrix
+
+The AI agent must generate these exact index paths. They ensure multi-tenant lookups remain fast, keeping queries efficient by avoiding full table scans.
+sql
+-- Dynamic Domain Identification Routing Indexes
+CREATE INDEX idx_tenants_subdomain ON tenants(subdomain);
+CREATE INDEX idx_tenants_custom_domain ON tenants(custom_domain);
+
+-- Multi-Tenant Composite Query Indexes
+-- Optimizes data filtering loops when combining tenant scopes with explicit records
+CREATE INDEX idx_users_tenant_lookup ON users(tenant_id, id);
+CREATE INDEX idx_projects_tenant_lookup ON projects(tenant_id, status);
+CREATE INDEX idx_change_orders_tenant_lookup ON change_orders(tenant_id, project_id, status);
+Use code with caution.
+
+4. Query Enforcement Template for the AI Agent
+
+When generating data controller layer routes, the AI agent must mirror this query pattern structure to maintain secure boundaries:
+sql
+-- Secure Example: Fetching a single change order record safely bounded by tenant verification
+SELECT * 
+FROM change_orders 
+WHERE id = $1 
+  AND tenant_id = $2; -- $2 represents target value parsed explicitly from req.tenant.id middleware

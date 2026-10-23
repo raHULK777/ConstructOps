@@ -1,0 +1,61 @@
+
+🗺️ Software Requirement Specification (SRS) & Scope Boundary
+
+Project Name: ConstructOps Engine
+Version: 1.0.0 (MVP Implementation Specification)
+Author/Context Builder: Lead Architect
+
+1. Executive Summary & Core Objective
+
+The ConstructOps Engine is a specialized, multi-tenant software-as-a-service (SaaS) architecture built to modernize the operational workflows of mid-sized commercial and residential trade contractors ($7M–$15M revenue). The primary goal of Version 1.0.0 is to eradicate paper-based workflows and fragmented spreadsheets by providing a single, highly performant web framework. The system will programmatically morph its branding assets and functional capabilities at runtime based on the accessing tenant's domain, delivering a tailored workspace for each contractor.
+
+2. Tech Stack & Environment Enforcement
+
+The AI agent must write code exclusively within the boundaries of this tech stack. Alternatives are rejected.
+• Runtime Environment: Node.js (v20.x or higher, Long-Term Support)
+• Web Framework: Express.js (Strictly using asynchronous error handling wrappers)
+• Database Management: PostgreSQL (Relational schema, forced reference constraints)
+• Caching & State Storage: Redis (For high-speed, sub-millisecond tenant metadata caching)
+• Authentication Token Standard: JSON Web Tokens (JWT, utilizing RS256 or HS256)
+
+3. Scope Boundaries: In-Scope vs. Out-of-Scope (Strict Enforcement)
+
+To optimize API execution and prevent code drift, the AI agent must strictly adhere to these boundaries. Do not write code for out-of-scope items.
+
+✅ In-Scope (Must Be Implemented)
+
+• Logical Multi-Tenancy Middleware: Dynamically intercepting, resolving, and validating the active tenant context using the inbound request headers (req.headers.host) before processing business endpoints.
+• Role-Based Access Control (RBAC): Three strictly separated operational clearings: admin (Contractor executives/managers), field_staff (Project superintendents), and client (End-use property owners).
+• Interactive Smart Quotation Matrix: A public-facing api computation tool that processes variable dimensional metrics (e.g., square footage, material tier selection codes) against a tenant's isolated JSON pricing configuration.
+• The Change Order Execution Loop: Secured workflows enabling admin or field_staff to issue scope modifications, and allowing verified client accounts to digitally execute them with logged cryptographic handshakes (IP tracking and explicit timestamping).
+
+❌ Out-of-Scope (Strictly Forbidden in this Phase)
+
+• Real-time Dynamic Chat Infrastructure: No WebSockets, Socket.io, or persistent chat logging pools. Communication alerts are strictly transactional email notifications.
+• Native Mobile Application Builds: No React Native, Flutter, or Swift code compilation. The entire viewport scope is restricted to a mobile-responsive web app configuration.
+• Direct Third-Party ERP/Accounting Hooks: No direct live synchronization modules for QuickBooks Enterprise or Sage 300. Data exports must be handled via flat-file CSV downloads only.
+• Binary Document Parse Engine: No processing of heavy engineering CAD files or complex PDF manipulation layers. Document management is strictly restricted to asset file paths.
+
+4. User Roles & Detailed User Stories
+
+The AI agent will reference these user stories to construct logical route permissions.
+
+A. System Administrator (admin)
+
+• As a contractor business owner, I want to log into my dashboard so I can review live financial projections and active margin distributions across all ongoing construction developments.
+• As a contractor project manager, I want to draft a new Change Order details profile so I can formally request additional funding approval from the property client for project upgrades.
+
+B. Field Staff (field_staff)
+
+• As an on-site field superintendent, I want to pull up the active project tracking dashboard on a tablet so I can update the phase status marker (e.g., changing from "Framing" to "Electrical").
+
+C. Client Guest (client)
+
+• As a residential or commercial property client, I want to log into my secure project portal so I can review real-time phase completion updates and check on status changes.
+• As a property client, I want to review a pending Change Order request and click "Approve" so the work crew can legally begin structural adjustments.
+
+5. Security & Isolation Constraints
+
+• Cross-Tenant Leakage Protection: The AI agent must systematically enforce data isolation. Every query string interacting with relational tables (users, projects, change_orders) must hard-bind the verified tenant reference context using a strict WHERE tenant_id = req.tenant.id parameter clause.
+• Authentication Mapping: All API endpoints under the /api/v1/protected/* route path must chain the authentication validation sequence, confirming that the token metadata payload matches the accessing tenant context layout definitions perfectly.
+Now that the SRS & Scope Boundary (Document #1) is set up, would you like me to generate the Definitive Database Schema Mapping (Document #2) or the API Route Matrix & Contract Specifications (Document #5) next?

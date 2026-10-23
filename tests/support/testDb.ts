@@ -9,6 +9,7 @@ const MIGRATION_FILES = [
   '002_indexes.sql',
   '003_auth_sessions.sql',
   '004_project_workspace.sql',
+  '005_password_resets.sql',
 ] as const;
 
 /**

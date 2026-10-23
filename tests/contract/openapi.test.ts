@@ -31,6 +31,8 @@ const PUBLIC_OPERATIONS = new Set([
   'login',
   'refreshSession',
   'logoutSession',
+  'forgotPassword',
+  'resetPassword',
   'getTenantBranding',
   'estimateProject',
 ]);
@@ -83,8 +85,8 @@ describe('OpenAPI contract', () => {
   });
 
   it('documents the full implemented surface', () => {
-    expect(operations).toHaveLength(25);
-    expect(new Set(operations.map((operation) => operation.operationId)).size).toBe(25);
+    expect(operations).toHaveLength(27);
+    expect(new Set(operations.map((operation) => operation.operationId)).size).toBe(27);
   });
 
   it('gives every operation an id, summary, tag and success response', () => {

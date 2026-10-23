@@ -2,6 +2,7 @@ import assert from 'node:assert/strict';
 import { createServer, request as httpRequest } from 'node:http';
 import type { IncomingHttpHeaders } from 'node:http';
 import { createApp } from '../src/app';
+import { createMailer } from '../src/services/mailer';
 import { silentLogger } from '../src/utils/logger';
 import { createTestDb } from '../tests/support/testDb';
 import { FakeRedis } from '../tests/support/fakeRedis';
@@ -77,7 +78,13 @@ async function main(): Promise<void> {
   const db = await createTestDb();
   const redis = new FakeRedis();
   const env = createTestEnv();
-  const app = createApp({ env, db, redis, logger: silentLogger() });
+  const app = createApp({
+    env,
+    db,
+    redis,
+    mailer: createMailer('none', silentLogger()),
+    logger: silentLogger(),
+  });
 
   const tenantId = await insertTenant(db, { subdomain: 'smoke', companyName: 'Smoke Builders' });
   await insertUser(db, tenantId, 'admin@smoke.test', 'admin');

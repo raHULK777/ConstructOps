@@ -2,6 +2,7 @@ import 'dotenv/config';
 import { createEnv } from '../src/config/env';
 import { createPool } from '../src/config/database';
 import { createRedis } from '../src/config/redis';
+import { createMailer } from '../src/services/mailer';
 import { createLogger } from '../src/utils/logger';
 import { onboardTenantSchema } from '../src/modules/tenant/tenant.schemas';
 import { onboardTenant } from '../src/modules/tenant/tenant.service';
@@ -55,7 +56,10 @@ async function main(): Promise<void> {
   const redis = createRedis(env, logger);
 
   try {
-    const result = await onboardTenant({ env, db: pool, redis, logger }, parsed.data);
+    const result = await onboardTenant(
+      { env, db: pool, redis, mailer: createMailer(env.mailTransport, logger), logger },
+      parsed.data,
+    );
     const host = env.platformRootDomain
       ? `${result.subdomain}.${env.platformRootDomain}`
       : (parsed.data.customDomain ?? result.subdomain);

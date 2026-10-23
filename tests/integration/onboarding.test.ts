@@ -19,7 +19,7 @@ describe('tenant onboarding', () => {
 
   it('provisions a tenant and an administrator that can immediately log in', async () => {
     const result = await onboardTenant(
-      { env: ctx.env, db: ctx.db, redis: ctx.redis, logger: silentLogger() },
+      { env: ctx.env, db: ctx.db, redis: ctx.redis, mailer: ctx.mailer, logger: silentLogger() },
       {
         companyName: 'Ironclad Construction',
         subdomain: 'ironclad',
@@ -49,7 +49,7 @@ describe('tenant onboarding', () => {
   });
 
   it('refuses a duplicate subdomain and leaves the original tenant intact', async () => {
-    const deps = { env: ctx.env, db: ctx.db, redis: ctx.redis, logger: silentLogger() };
+    const deps = { env: ctx.env, db: ctx.db, redis: ctx.redis, mailer: ctx.mailer, logger: silentLogger() };
     const input = {
       companyName: 'First Co',
       subdomain: 'duplicate',
@@ -77,7 +77,7 @@ describe('tenant onboarding', () => {
   });
 
   it('rejects an invalid subdomain and a weak password before touching the database', async () => {
-    const deps = { env: ctx.env, db: ctx.db, redis: ctx.redis, logger: silentLogger() };
+    const deps = { env: ctx.env, db: ctx.db, redis: ctx.redis, mailer: ctx.mailer, logger: silentLogger() };
 
     await expect(
       onboardTenant(deps, {

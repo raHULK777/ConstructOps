@@ -7,6 +7,7 @@ import { silentLogger } from '../../src/utils/logger';
 import { createTestDb } from './testDb';
 import { createTestEnv, TEST_PASSWORD } from './testEnv';
 import { FakeRedis } from './fakeRedis';
+import { CapturingMailer } from './mailer';
 
 export const HOSTS = {
   alpha: 'alpha.constructops.test',
@@ -17,6 +18,7 @@ export interface TestContext {
   app: Express;
   db: Db;
   redis: FakeRedis;
+  mailer: CapturingMailer;
   env: Env;
   close: () => Promise<void>;
 }
@@ -30,13 +32,15 @@ export async function createTestContext(
 ): Promise<TestContext> {
   const db = await createTestDb();
   const redis = new FakeRedis();
+  const mailer = new CapturingMailer();
   const env = createTestEnv(envOverrides);
-  const app = createApp({ env, db, redis, logger: silentLogger() });
+  const app = createApp({ env, db, redis, mailer, logger: silentLogger() });
 
   return {
     app,
     db,
     redis,
+    mailer,
     env,
     close: async () => {
       await db.end().catch(() => undefined);

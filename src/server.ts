@@ -4,6 +4,7 @@ import { createApp } from './app';
 import { createEnv } from './config/env';
 import { assertDatabaseReachable, createPool } from './config/database';
 import { assertRedisReachable, createRedis } from './config/redis';
+import { createMailer } from './services/mailer';
 import { createLogger } from './utils/logger';
 
 async function main(): Promise<void> {
@@ -27,7 +28,7 @@ async function main(): Promise<void> {
     });
   }
 
-  const app = createApp({ env, db: pool, redis, logger });
+  const app = createApp({ env, db: pool, redis, mailer: createMailer(env.mailTransport, logger), logger });
   const server = createServer(app);
 
   server.listen(env.port, () => {

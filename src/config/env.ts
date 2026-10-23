@@ -28,6 +28,11 @@ const envSchema = z.object({
   /** Lifetime of a refresh token / server-side session. */
   REFRESH_TOKEN_TTL_DAYS: z.coerce.number().int().min(1).max(365).default(30),
 
+  /** Base URL of the portal, used in emailed reset links when no tenant domain is known. */
+  APP_PORTAL_URL: z.url().optional(),
+  RESET_TOKEN_TTL_MINUTES: z.coerce.number().int().min(5).max(1440).default(60),
+  MAIL_TRANSPORT: z.enum(['console', 'none']).optional(),
+
   PLATFORM_ROOT_DOMAIN: z.string().min(1).optional(),
 
   TRUST_PROXY: z.string().default('false'),
@@ -52,6 +57,10 @@ export interface Env {
   jwtIssuer: string;
   jwtAudience: string;
   refreshTokenTtlDays: number;
+  portalUrl: string;
+  portalUrlExplicit: boolean;
+  resetTokenTtlMinutes: number;
+  mailTransport: 'console' | 'none';
   platformRootDomain: string | null;
   trustProxy: boolean | number | string;
   corsOrigins: string[];
@@ -95,6 +104,11 @@ export function createEnv(raw: NodeJS.ProcessEnv = process.env): Env {
     jwtIssuer: value.JWT_ISSUER,
     jwtAudience: value.JWT_AUDIENCE,
     refreshTokenTtlDays: value.REFRESH_TOKEN_TTL_DAYS,
+    portalUrl: (value.APP_PORTAL_URL ?? 'http://localhost:3000').replace(/\/+$/, ''),
+    portalUrlExplicit: value.APP_PORTAL_URL !== undefined,
+    resetTokenTtlMinutes: value.RESET_TOKEN_TTL_MINUTES,
+    // Safe default: never log reset links in production unless explicitly enabled.
+    mailTransport: value.MAIL_TRANSPORT ?? (value.NODE_ENV === 'production' ? 'none' : 'console'),
     platformRootDomain: rootDomain,
     trustProxy: parseTrustProxy(value.TRUST_PROXY),
     corsOrigins: value.CORS_ORIGINS.split(',')

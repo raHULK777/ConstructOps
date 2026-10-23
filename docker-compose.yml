@@ -19,6 +19,9 @@ x-api-environment: &api-environment
   TRUST_PROXY: 'false'
   BCRYPT_ROUNDS: '10'
   SEED_PASSWORD: ChangeMe!123
+  APP_PORTAL_URL: http://localhost:3000
+  # Demo only: reset links are printed to the API log. Use a real transport in production.
+  MAIL_TRANSPORT: console
 
 services:
   postgres:

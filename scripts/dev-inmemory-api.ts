@@ -1,7 +1,8 @@
 import { createServer } from 'node:http';
 import { createApp } from '../src/app';
 import { seedDemoTenants } from '../src/demo/seed';
-import { silentLogger } from '../src/utils/logger';
+import { createMailer } from '../src/services/mailer';
+import { createLogger, silentLogger } from '../src/utils/logger';
 import { FakeRedis } from '../tests/support/fakeRedis';
 import { createTestDb } from '../tests/support/testDb';
 import { createTestEnv } from '../tests/support/testEnv';
@@ -28,7 +29,16 @@ async function main(): Promise<void> {
     SEED_PASSWORD,
   );
 
-  const app = createApp({ env, db, redis, logger: silentLogger() });
+  // Emails are printed here (console transport) so reset links are easy to grab
+  // while developing locally. The API's request log stays quiet.
+  const mailLogger = createLogger({ level: 'info', pretty: true });
+  const app = createApp({
+    env,
+    db,
+    redis,
+    mailer: createMailer('console', mailLogger),
+    logger: silentLogger(),
+  });
   const server = createServer(app);
 
   await new Promise<void>((resolve) => server.listen(PORT, '127.0.0.1', resolve));

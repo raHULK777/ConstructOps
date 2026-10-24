@@ -154,6 +154,7 @@ portal/                        Next.js white-label portal (see "Portal" below)
 migrations/                    000–005: extensions, tables, indexes, sessions, workspace, resets
 scripts/                       migrate, seed, onboard, smoke, dev:all, dev:memory
 docs/openapi.yaml              OpenAPI 3.1 contract
+docs/marketing-site-plan.md    Public website plan (draft for approval)
 tests/                         support harness + unit + integration + contract
 tests/e2e/                     Playwright browser suite (Chromium)
 playwright.config.ts           boots the in-memory API + portal for e2e runs
